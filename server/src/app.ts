@@ -27,9 +27,11 @@ app.use(morgan('dev'));
 app.use(attachRequestId);
 
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20 });
+const apiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 120 });
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
+app.use('/api', apiLimiter);
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/drugs', drugRoutes);
 app.use('/api/pharmacies', pharmacyRoutes);
