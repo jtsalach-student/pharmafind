@@ -1,0 +1,216 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  PHARMACIST
+  PHARMACY_ADMIN
+  DRIVER
+  SYSTEM_ADMIN
+}
+
+enum PrescriptionStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  CLARIFICATION_REQUESTED
+}
+
+enum DeliveryStatus {
+  REQUESTED
+  ASSIGNED
+  COLLECTED
+  IN_TRANSIT
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+}
+
+model User {
+  id            String            @id @default(cuid())
+  username      String            @unique
+  passwordHash  String
+  fullName      String?
+  phone         String?
+  role          Role              @default(USER)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  prescriptions Prescription[]
+  deliveries    DeliveryRequest[]
+  notifications Notification[]
+  auditLogs     AuditLog[]
+  pharmacist    Pharmacist?
+  adminUser     AdminUser?
+  driver        Driver?
+}
+
+model Pharmacy {
+  id          String        @id @default(cuid())
+  name        String
+  address     String
+  phone       String
+  latitude    Float
+  longitude   Float
+  opensAt     String
+  closesAt    String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  inventory   Inventory[]
+  pharmacists Pharmacist[]
+  admins      AdminUser[]
+}
+
+model Drug {
+  id             String      @id @default(cuid())
+  genericName    String
+  brandName      String
+  category       String
+  requiresRx     Boolean     @default(false)
+  isEmergency    Boolean     @default(false)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  inventoryItems Inventory[]
+}
+
+model Pharmacist {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  pharmacyId String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pharmacy   Pharmacy @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+}
+
+model AdminUser {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  pharmacyId String?
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pharmacy   Pharmacy? @relation(fields: [pharmacyId], references: [id], onDelete: SetNull)
+}
+
+model Inventory {
+  id          String   @id @default(cuid())
+  pharmacyId  String
+  drugId      String
+  quantity    Int      @default(0)
+  isAvailable Boolean  @default(true)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  pharmacy    Pharmacy @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+  drug        Drug     @relation(fields: [drugId], references: [id], onDelete: Cascade)
+
+  @@unique([pharmacyId, drugId])
+}
+
+model Prescription {
+  id                String             @id @default(cuid())
+  userId            String
+  pharmacyId        String?
+  drugId            String?
+  filePath          String
+  originalFileName  String
+  mimeType          String
+  fileSize          Int
+  status            PrescriptionStatus @default(PENDING_REVIEW)
+  ocrText           String?
+  ocrConfidence     Float?
+  reviewReason      String?
+  reviewedById      String?
+  reviewedAt        DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveryRequests  DeliveryRequest[]
+}
+
+model DeliveryRequest {
+  id             String         @id @default(cuid())
+  userId         String
+  prescriptionId String
+  driverId       String?
+  status         DeliveryStatus @default(REQUESTED)
+  requestedAt    DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  prescription   Prescription   @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  driver         Driver?        @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  gpsLocations   GPSLocation[]
+  payment        Payment?
+}
+
+model Driver {
+  id         String            @id @default(cuid())
+  userId     String            @unique
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries DeliveryRequest[]
+  gpsRecords GPSLocation[]
+}
+
+model GPSLocation {
+  id         String          @id @default(cuid())
+  deliveryId String
+  driverId   String
+  latitude   Float
+  longitude  Float
+  createdAt  DateTime        @default(now())
+  delivery   DeliveryRequest @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  driver     Driver          @relation(fields: [driverId], references: [id], onDelete: Cascade)
+}
+
+model Payment {
+  id               String        @id @default(cuid())
+  deliveryId       String        @unique
+  reference        String        @unique
+  amountGhs        Float
+  provider         String        @default("PAYSTACK")
+  providerResponse String?
+  status           PaymentStatus @default(PENDING)
+  verifiedAt       DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  delivery         DeliveryRequest @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id               String             @id @default(cuid())
+  userId           String
+  message          String
+  status           NotificationStatus @default(PENDING)
+  provider         String
+  providerRef      String?
+  type             String
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  actorId      String?
+  action       String
+  targetEntity String
+  targetId     String?
+  outcome      String
+  metadata     String?
+  createdAt    DateTime @default(now())
+  actor        User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+}
