@@ -4,7 +4,20 @@ import { z } from 'zod';
 import { prisma } from '../config/prisma.js';
 import { requireAuth, requireRoles } from '../middleware/auth.js';
 import { writeAudit } from '../utils/audit.js';
+import { createDeliveryStatusMessage } from '../utils/notifications.js';
 import { canTransitionDelivery } from '../utils/workflows.js';
+
+const createUserNotification = async (userId: string, message: string, type: string) => {
+  await prisma.notification.create({
+    data: {
+      userId,
+      message,
+      type,
+      provider: 'SYSTEM',
+      status: 'SENT'
+    }
+  });
+};
 
 const router = Router();
 
@@ -42,6 +55,18 @@ router.get('/my', requireAuth, async (req, res, next) => {
   try {
     const deliveries = await prisma.deliveryRequest.findMany({ where: { userId: req.user!.id }, orderBy: { updatedAt: 'desc' } });
     res.json({ items: deliveries });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/requested', requireAuth, requireRoles(Role.DRIVER), async (_req, res, next) => {
+  try {
+    const items = await prisma.deliveryRequest.findMany({
+      where: { status: DeliveryStatus.REQUESTED },
+      orderBy: { requestedAt: 'asc' }
+    });
+    res.json({ items });
   } catch (error) {
     next(error);
   }
@@ -90,6 +115,17 @@ router.patch('/:id/status', requireAuth, requireRoles(Role.DRIVER, Role.PHARMACY
     }
 
     const updated = await prisma.deliveryRequest.update({ where: { id: deliveryId }, data: { status: parsed.data.status } });
+
+    const statusMessage = createDeliveryStatusMessage(updated.status);
+    await createUserNotification(delivery.userId, statusMessage, `DELIVERY_${updated.status}`);
+
+    if (req.user!.role === Role.DRIVER) {
+      const driver = await prisma.driver.findUnique({ where: { userId: req.user!.id } });
+      if (driver) {
+        await createUserNotification(delivery.userId, `Driver ${driver.id} updated the delivery to ${updated.status}.`, 'DRIVER_STATUS_UPDATE');
+      }
+    }
+
     await writeAudit({ actorId: req.user!.id, action: 'DELIVERY_STATUS_UPDATE', targetEntity: 'DeliveryRequest', targetId: updated.id, outcome: 'SUCCESS', metadata: { from: delivery.status, to: updated.status } });
     res.json(updated);
   } catch (error) {
@@ -111,6 +147,7 @@ router.post('/:id/assign-driver', requireAuth, requireRoles(Role.PHARMACY_ADMIN,
       data: { driverId: parsed.data.driverId, status: 'ASSIGNED' }
     });
 
+    await createUserNotification(delivery.userId, 'A driver has been assigned to your delivery.', 'DRIVER_ASSIGNED');
     await writeAudit({ actorId: req.user!.id, action: 'DELIVERY_ASSIGNED', targetEntity: 'DeliveryRequest', targetId: delivery.id, outcome: 'SUCCESS', metadata: { driverId: parsed.data.driverId } });
     res.json(delivery);
   } catch (error) {

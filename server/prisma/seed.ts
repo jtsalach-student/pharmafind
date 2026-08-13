@@ -69,10 +69,10 @@ async function main() {
   }
 
   const [user, admin, pharmacistUser, driverUser] = await Promise.all([
-    prisma.user.create({ data: { username: 'testuser', passwordHash: await bcrypt.hash('Test123!', 10), role: Role.USER, phone: '+233201111111' } }),
-    prisma.user.create({ data: { username: 'campusadmin', passwordHash: await bcrypt.hash('Admin123!', 10), role: Role.PHARMACY_ADMIN, phone: '+233202222222' } }),
-    prisma.user.create({ data: { username: 'pharmacist1', passwordHash: await bcrypt.hash('Pharma123!', 10), role: Role.PHARMACIST, phone: '+233203333333' } }),
-    prisma.user.create({ data: { username: 'driver1', passwordHash: await bcrypt.hash('Driver123!', 10), role: Role.DRIVER, phone: '+233204444444' } })
+    prisma.user.create({ data: { username: 'testuser', passwordHash: await bcrypt.hash('Test123!', 10), role: Role.USER, phone: '+233201111111', createdAt: new Date(), updatedAt: new Date() } }),
+    prisma.user.create({ data: { username: 'campusadmin', passwordHash: await bcrypt.hash('Admin123!', 10), role: Role.PHARMACY_ADMIN, phone: '+233202222222', createdAt: new Date(), updatedAt: new Date() } }),
+    prisma.user.create({ data: { username: 'pharmacist1', passwordHash: await bcrypt.hash('Pharma123!', 10), role: Role.PHARMACIST, phone: '+233203333333', createdAt: new Date(), updatedAt: new Date() } }),
+    prisma.user.create({ data: { username: 'driver1', passwordHash: await bcrypt.hash('Driver123!', 10), role: Role.DRIVER, phone: '+233204444444', createdAt: new Date(), updatedAt: new Date() } })
   ]);
 
   await prisma.adminUser.create({ data: { userId: admin.id, pharmacyId: pharmacies[0].id } });

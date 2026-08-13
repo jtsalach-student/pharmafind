@@ -9,6 +9,7 @@ import { prisma } from '../config/prisma.js';
 import { requireAuth, requireRoles } from '../middleware/auth.js';
 import { saveFileLocally } from '../storage/index.js';
 import { writeAudit } from '../utils/audit.js';
+import { buildPrescriptionStatusMessage } from '../utils/notifications.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -16,8 +17,26 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 *
 const allowedMimes = ['image/jpeg', 'image/png', 'application/pdf'];
 const allowedExt = ['.jpg', '.jpeg', '.png', '.pdf'];
 
+const createUserNotification = async (userId: string, message: string, type: string) => {
+  await prisma.notification.create({
+    data: {
+      userId,
+      message,
+      type,
+      provider: 'SYSTEM',
+      status: 'SENT'
+    }
+  });
+};
+
 router.post('/', requireAuth, upload.single('file'), async (req, res, next) => {
   try {
+    const quantity = req.body.quantity ? Number(req.body.quantity) : null;
+    const deliveryAddress = typeof req.body.deliveryAddress === 'string' ? req.body.deliveryAddress : null;
+    const phoneNumber = typeof req.body.phoneNumber === 'string' ? req.body.phoneNumber : null;
+    const pharmacyId = typeof req.body.pharmacyId === 'string' ? req.body.pharmacyId : null;
+    const drugId = typeof req.body.drugId === 'string' ? req.body.drugId : null;
+
     if (!req.file) {
       res.status(400).json({ error: { message: 'file is required', requestId: req.requestId } });
       return;
@@ -46,15 +65,22 @@ router.post('/', requireAuth, upload.single('file'), async (req, res, next) => {
     const prescription = await prisma.prescription.create({
       data: {
         userId: req.user!.id,
+        pharmacyId: pharmacyId ?? undefined,
+        drugId: drugId ?? undefined,
         filePath,
         originalFileName: req.file.originalname,
         mimeType: req.file.mimetype,
         fileSize: req.file.size,
+        quantity: Number.isFinite(quantity) ? quantity : null,
+        deliveryAddress: deliveryAddress ?? undefined,
+        phoneNumber: phoneNumber ?? undefined,
         status: 'PENDING_REVIEW',
         ocrText,
         ocrConfidence: confidence
       }
     });
+
+    await createUserNotification(req.user!.id, 'Prescription uploaded. Pharmacist review is pending.', 'PRESCRIPTION_UPLOADED');
 
     await writeAudit({
       actorId: req.user!.id,
@@ -133,6 +159,13 @@ router.patch('/:id/review', requireAuth, requireRoles(Role.PHARMACIST), async (r
       }
     });
 
+    const message = buildPrescriptionStatusMessage(parsed.data.decision);
+    await createUserNotification(updated.userId, message, `PRESCRIPTION_${parsed.data.decision}`);
+
+    if (parsed.data.decision === 'REJECTED') {
+      await prisma.deliveryRequest.updateMany({ where: { prescriptionId: updated.id, status: { not: 'CANCELLED' } }, data: { status: 'CANCELLED' } });
+    }
+
     await writeAudit({
       actorId: req.user!.id,
       action: 'PRESCRIPTION_REVIEWED',
@@ -142,7 +175,7 @@ router.patch('/:id/review', requireAuth, requireRoles(Role.PHARMACIST), async (r
       metadata: { decision: parsed.data.decision }
     });
 
-    res.json({ prescription: updated });
+    res.json({ prescription: updated, message });
   } catch (error) {
     next(error);
   }

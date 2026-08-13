@@ -29,12 +29,15 @@ router.post('/register', validate(registerSchema), async (req, res, next) => {
       return;
     }
 
+    const now = new Date();
     const user = await prisma.user.create({
       data: {
         username,
         passwordHash: await hashPassword(password),
         fullName,
-        phone
+        phone,
+        createdAt: now,
+        updatedAt: now
       }
     });
 

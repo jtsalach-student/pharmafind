@@ -1,4 +1,7 @@
+import dotenv from 'dotenv';
 import { z } from 'zod';
+
+dotenv.config();
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -16,6 +19,8 @@ const envSchema = z.object({
   HUBTEL_CLIENT_ID: z.string().optional(),
   HUBTEL_CLIENT_SECRET: z.string().optional(),
   HUBTEL_SENDER_ID: z.string().optional(),
+  FIREBASE_SERVICE_ACCOUNT_KEY: z.string().optional(),
+  FIREBASE_PROJECT_ID: z.string().optional(),
   STORAGE_DIR: z.string().default('uploads')
 });
 
