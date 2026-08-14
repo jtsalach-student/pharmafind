@@ -24,6 +24,7 @@ describe('User Table Timestamps', () => {
     const user = await prisma.user.create({
       data: {
         username: `test_timestamp_${Date.now()}`,
+        email: `test_timestamp_${Date.now()}@test.local`,
         passwordHash: 'hashedpassword123',
         fullName: 'Test User',
         phone: '+2332012345678',
@@ -63,6 +64,7 @@ describe('User Table Timestamps', () => {
     const user = await prisma.user.create({
       data: {
         username,
+        email: `${username}@test.local`,
         passwordHash: 'hashedpassword456',
         role: Role.USER
       }

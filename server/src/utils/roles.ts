@@ -5,8 +5,6 @@ export type DbRole = (typeof DB_ROLE_VALUES)[number];
 export const LEGACY_ROLE_MAP: Record<string, DbRole> = {
   patient: 'USER',
   pharmacist: 'PHARMACIST',
-  hospital_staff: 'PHARMACY_ADMIN',
-  hospitalstaff: 'PHARMACY_ADMIN',
   driver: 'DRIVER',
   admin: 'SYSTEM_ADMIN'
 };

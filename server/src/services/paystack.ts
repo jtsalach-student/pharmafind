@@ -50,8 +50,11 @@ export const initializePayment = async (
   metadata: Record<string, any> = {}
 ): Promise<PaystackInitializeResponse> => {
   try {
+    console.info('[Paystack Init] Initializing payment', { email, amountGhs, metadata });
+    
     if (!env.PAYSTACK_SECRET_KEY) {
       // Mock mode for development
+      console.warn('[Paystack Init] PAYSTACK_SECRET_KEY not configured - using MOCK mode');
       const reference = `mock_ref_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       return {
         status: true,
@@ -65,6 +68,7 @@ export const initializePayment = async (
     }
 
     const amountPesewas = Math.round(amountGhs * 100); // Convert GHS to pesewas
+    console.info('[Paystack Init] Amount conversion', { amountGhs, amountPesewas });
     
     const response = await client.post<PaystackInitializeResponse>('/transaction/initialize', {
       email,
@@ -76,6 +80,10 @@ export const initializePayment = async (
       }
     });
 
+    console.info('[Paystack Init] Payment initialization successful', {
+      reference: response.data.data.reference,
+      accessCode: response.data.data.access_code
+    });
     return response.data;
   } catch (error) {
     const axiosError = error as AxiosError;
@@ -94,8 +102,11 @@ export const initializePayment = async (
  */
 export const verifyPayment = async (reference: string): Promise<PaystackVerifyResponse> => {
   try {
+    console.info('[Paystack Verify] Verifying payment', { reference });
+    
     if (!env.PAYSTACK_SECRET_KEY) {
       // Mock verification for development
+      console.warn('[Paystack Verify] PAYSTACK_SECRET_KEY not configured - using MOCK mode');
       return {
         status: true,
         message: 'Verification successful (MOCK)',
@@ -116,7 +127,14 @@ export const verifyPayment = async (reference: string): Promise<PaystackVerifyRe
       };
     }
 
+    console.info('[Paystack Verify] Making API call to Paystack', { reference });
     const response = await client.get<PaystackVerifyResponse>(`/transaction/verify/${reference}`);
+    console.info('[Paystack Verify] API response received', {
+      reference,
+      status: response.data.status,
+      paymentStatus: response.data.data?.status,
+      amount: response.data.data?.amount
+    });
     return response.data;
   } catch (error) {
     const axiosError = error as AxiosError;

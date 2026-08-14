@@ -27,6 +27,7 @@ enum DeliveryStatus {
   COLLECTED
   IN_TRANSIT
   COMPLETED
+  DELIVERED
   CANCELLED
 }
 
@@ -45,6 +46,7 @@ enum NotificationStatus {
 
 model User {
   id            String            @id @default(cuid())
+  email         String            @unique
   username      String            @unique
   passwordHash  String
   fullName      String?
@@ -82,6 +84,7 @@ model Drug {
   genericName    String
   brandName      String
   category       String
+  price          Decimal     @db.Decimal(10,2)
   requiresRx     Boolean     @default(false)
   isEmergency    Boolean     @default(false)
   createdAt      DateTime    @default(now())
@@ -158,6 +161,9 @@ model DeliveryRequest {
   etaMinutes     Int?
   distanceKm     Float?
   requestedAt    DateTime       @default(now())
+  acceptedAt     DateTime?
+  collectedAt    DateTime?
+  deliveredAt    DateTime?
   updatedAt      DateTime       @updatedAt
   user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   prescription   Prescription   @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
@@ -167,11 +173,17 @@ model DeliveryRequest {
 }
 
 model Driver {
-  id         String            @id @default(cuid())
-  userId     String            @unique
-  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  deliveries DeliveryRequest[]
-  gpsRecords GPSLocation[]
+  id                String            @id @default(cuid())
+  userId            String            @unique
+  vehicleType       String            @default("Motorcycle")
+  isAvailable       Boolean           @default(true)
+  totalDeliveries   Int               @default(0)
+  completedCount    Int               @default(0)
+  cancelledCount    Int               @default(0)
+  successRate       Float             @default(100)
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries        DeliveryRequest[]
+  gpsRecords        GPSLocation[]
 }
 
 model GPSLocation {

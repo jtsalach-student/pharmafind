@@ -20,6 +20,7 @@ type DrugRecord = {
   genericName: string;
   brandName: string;
   category?: string;
+  price?: number | string;
   isEmergency?: boolean;
   requiresRx?: boolean;
 };
@@ -57,7 +58,7 @@ const roleMeta: Record<RoleKey, RoleMeta> = {
     icon: Stethoscope
   },
   PHARMACY_ADMIN: {
-    label: 'Hospital Dashboard',
+    label: 'Pharmacy Admin Dashboard',
     accent: 'from-emerald-500 to-sky-500',
     icon: ShieldAlert
   },
@@ -124,7 +125,7 @@ export function DashboardPage() {
 
         const [location, emergencyData] = await Promise.all([
           getDeviceLocation(15000),
-          client.from('Drug').select('id, genericName, brandName, category, isEmergency').eq('isEmergency', true).order('genericName', { ascending: true }).limit(5)
+          client.from('Drug').select('id, genericName, brandName, category, isEmergency, price').eq('isEmergency', true).order('genericName', { ascending: true }).limit(5)
         ]);
 
         setUserLocation(location ?? null);
@@ -282,7 +283,7 @@ export function DashboardPage() {
 
       const { data: rows, error } = await client
         .from('Drug')
-        .select('id, genericName, brandName, category, isEmergency, requiresRx')
+        .select('id, genericName, brandName, category, isEmergency, requiresRx, price')
         .or(conditions)
         .order('genericName', { ascending: true })
         .limit(20);
@@ -349,6 +350,8 @@ export function DashboardPage() {
           pharmacyId: pharmacy.pharmacyId,
           pharmacyName: pharmacy.pharmacyName,
           quantity: 1,
+          unitPrice: Number(drugForOrder.price ?? 0),
+          deliveryFee: 2.5,
           requiresRx: true
         }
       });
@@ -371,7 +374,7 @@ export function DashboardPage() {
           pharmacyId: pharmacy.pharmacyId,
           pharmacyName: pharmacy.pharmacyName,
           quantity: 1,
-          unitPrice: 0, // Will be looked up from inventory
+          unitPrice: Number(drugForOrder.price ?? 0),
           deliveryFee: 2.5,
           requiresRx: false
         }
@@ -522,6 +525,7 @@ export function DashboardPage() {
                     <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Drug</div>
                     <div className="mt-2 text-lg font-black text-slate-900">{drug.genericName}</div>
                     <div className="text-sm text-slate-600">{drug.brandName}</div>
+                    <div className="mt-3 text-sm font-semibold text-emerald-700">GH₵ {Number(drug.price ?? 0).toFixed(2)}</div>
                   </button>
                 ))}
               </div>

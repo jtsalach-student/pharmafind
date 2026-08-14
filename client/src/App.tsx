@@ -5,8 +5,13 @@ import { ProtectedRoute, RoleProtectedRoute } from './components/ProtectedRoute'
 import { getToken } from './lib/auth';
 import { AdminAuditPage } from './pages/AdminAuditPage';
 import { CheckEmailPage } from './pages/CheckEmailPage';
-import { DashboardPage } from './pages/DashboardPage';import { PaymentPage } from './pages/PaymentPage';import { DeliveryTrackingPage } from './pages/DeliveryTrackingPage';
+import { DashboardPage } from './pages/DashboardPage';
+import { PaymentPage } from './pages/PaymentPage';
+import { DeliveryTrackingPage } from './pages/DeliveryTrackingPage';
+import { MockDeliveryTrackingPage } from './pages/MockDeliveryTrackingPage';
+import DriverDashboardPage from './pages/DriverDashboardPage';
 import { EmergencyPage } from './pages/EmergencyPage';
+import { EnvDebugPage } from './pages/EnvDebugPage';
 import { GenericPage } from './pages/GenericPage';
 import { InventoryPage } from './pages/InventoryPage';
 import { LoginPage } from './pages/LoginPage';
@@ -45,6 +50,11 @@ function AppRoutes() {
           <Route path="/prescriptions/history" element={<ProtectedRoute><GenericPage title="User prescription history" /></ProtectedRoute>} />
           <Route path="/deliveries/request" element={<ProtectedRoute><GenericPage title="Delivery request" /></ProtectedRoute>} />
           <Route path="/deliveries/track" element={<ProtectedRoute><DeliveryTrackingPage /></ProtectedRoute>} />
+          <Route path="/mock-delivery/:deliveryId" element={<ProtectedRoute><MockDeliveryTrackingPage /></ProtectedRoute>} />
+          <Route path="/delivery/:deliveryId" element={<ProtectedRoute><MockDeliveryTrackingPage /></ProtectedRoute>} />
+          <Route path="/driver-dashboard" element={<RoleProtectedRoute allowedRoles={['DRIVER', 'SYSTEM_ADMIN']}><DriverDashboardPage /></RoleProtectedRoute>} />
+          <Route path="/driver-tracking/:deliveryId" element={<RoleProtectedRoute allowedRoles={['DRIVER', 'SYSTEM_ADMIN']}><MockDeliveryTrackingPage /></RoleProtectedRoute>} />
+          <Route path="/debug/env" element={<EnvDebugPage />} />
           <Route path="/payments" element={<ProtectedRoute><GenericPage title="Payment" /></ProtectedRoute>} />
           <Route path="/notifications" element={<ProtectedRoute><GenericPage title="User notifications" /></ProtectedRoute>} />
           <Route path="/admin" element={<RoleProtectedRoute allowedRoles={['SYSTEM_ADMIN']}><AdminAuditPage /></RoleProtectedRoute>} />

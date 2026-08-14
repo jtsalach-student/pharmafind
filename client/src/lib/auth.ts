@@ -3,6 +3,7 @@ export const ROLE_VALUES = ['USER', 'PHARMACIST', 'PHARMACY_ADMIN', 'DRIVER', 'S
 export type UserRole = (typeof ROLE_VALUES)[number];
 
 export type UserSession = {
+  id: string;
   name: string;
   email: string;
   role: UserRole;
@@ -14,8 +15,6 @@ export const userKey = 'pharmafind_user';
 const LEGACY_ROLE_MAP: Record<string, UserRole> = {
   patient: 'USER',
   pharmacist: 'PHARMACIST',
-  hospital_staff: 'PHARMACY_ADMIN',
-  hospitalstaff: 'PHARMACY_ADMIN',
   driver: 'DRIVER',
   admin: 'SYSTEM_ADMIN'
 };
@@ -56,8 +55,9 @@ export const createDemoSessionFromEmail = (email: string, role?: UserRole): User
 
   if (role) {
     return {
+      id: `demo-${normalized.replace(/[^a-z0-9]/g, '-')}-${resolvedRole.toLowerCase()}`,
       name: resolvedRole === 'PHARMACY_ADMIN'
-        ? 'Hospital Staff User'
+        ? 'Pharmacy Admin User'
         : resolvedRole === 'PHARMACIST'
           ? 'Pharmacist User'
           : resolvedRole === 'DRIVER'
@@ -71,22 +71,22 @@ export const createDemoSessionFromEmail = (email: string, role?: UserRole): User
   }
 
   if (normalized.includes('admin')) {
-    return { name: 'Admin User', email, role: 'SYSTEM_ADMIN' };
+    return { id: `demo-${normalized.replace(/[^a-z0-9]/g, '-')}-admin`, name: 'Admin User', email, role: 'SYSTEM_ADMIN' };
   }
 
   if (normalized.includes('pharmacist')) {
-    return { name: 'Pharmacist User', email, role: 'PHARMACIST' };
+    return { id: `demo-${normalized.replace(/[^a-z0-9]/g, '-')}-pharmacist`, name: 'Pharmacist User', email, role: 'PHARMACIST' };
   }
 
   if (normalized.includes('driver')) {
-    return { name: 'Driver User', email, role: 'DRIVER' };
+    return { id: `demo-${normalized.replace(/[^a-z0-9]/g, '-')}-driver`, name: 'Driver User', email, role: 'DRIVER' };
   }
 
-  if (normalized.includes('hospital')) {
-    return { name: 'Hospital Staff User', email, role: 'PHARMACY_ADMIN' };
+  if (normalized.includes('pharmacy')) {
+    return { id: `demo-${normalized.replace(/[^a-z0-9]/g, '-')}-pharmacy-admin`, name: 'Pharmacy Admin User', email, role: 'PHARMACY_ADMIN' };
   }
 
-  return { name: 'Patient User', email, role: 'USER' };
+  return { id: `demo-${normalized.replace(/[^a-z0-9]/g, '-')}-user`, name: 'Patient User', email, role: 'USER' };
 };
 
 export const getRoleDashboard = (role: UserRole): string => roleDashboardMap[role] ?? '/dashboard';
@@ -108,6 +108,7 @@ export const getUser = (): UserSession | null => {
     }
 
     return {
+      id: parsed.id ?? '',
       name: parsed.name ?? 'User',
       email: parsed.email ?? '',
       role: normalizedRole

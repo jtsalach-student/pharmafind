@@ -161,6 +161,7 @@ export type DrugStockResult = {
   drugId: string;
   drugName: string;
   brandName: string;
+  price: number;
   pharmacyId: string;
   pharmacyName: string;
   address: string;
@@ -182,7 +183,7 @@ export async function searchDrugAvailability(patientLocation: Coordinates, query
 
   const { data: drugs, error: drugError } = await supabase
     .from('Drug')
-    .select('*')
+    .select('id, genericName, brandName, category, isEmergency, requiresRx, price')
     .or(`genericName.ilike.%${trimmed}%,brandName.ilike.%${trimmed}%`)
     .limit(20);
 
@@ -241,6 +242,7 @@ export async function searchDrugAvailability(patientLocation: Coordinates, query
         drugId: drug.id,
         drugName: drug.genericName,
         brandName: drug.brandName,
+        price: Number(drug.price ?? 0),
         pharmacyId: pharmacy.id,
         pharmacyName: pharmacy.name,
         address: pharmacy.address ?? 'Address unavailable',

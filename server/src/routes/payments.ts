@@ -29,7 +29,9 @@ router.post('/initialize', requireAuth, async (req, res, next) => {
       deliveryId: z.string().optional(),
       amountGhs: z.number().positive(),
       reference: z.string().min(3).optional(),
-      email: z.string().email().optional()
+      email: z.string().email().optional(),
+      mockPayment: z.boolean().optional(),
+      paymentResult: z.enum(['success', 'failed']).optional()
     }).safeParse(req.body);
 
     if (!parsed.success) {
@@ -67,11 +69,81 @@ router.post('/initialize', requireAuth, async (req, res, next) => {
     }
 
     const reference = parsed.data.reference ?? `pay_${randomUUID().replace(/-/g, '')}`;
-    const email = parsed.data.email ?? `${req.user!.username}@example.com`;
+
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    if (!user) {
+      res.status(404).json({ error: { message: 'User not found', requestId: req.requestId } });
+      return;
+    }
+    const email = parsed.data.email ?? user.email;
 
     const existing = await prisma.payment.findUnique({ where: { reference } });
     if (existing) {
       res.status(409).json({ error: { message: 'Reference already exists', requestId: req.requestId } });
+      return;
+    }
+
+    if (parsed.data.mockPayment) {
+      const outcome = parsed.data.paymentResult === 'failed' ? 'failed' : 'success';
+      const mockStatus = outcome === 'success' ? 'PAID' : 'FAILED';
+      const payment = await prisma.payment.create({
+        data: {
+          deliveryId: delivery.id,
+          reference,
+          amountGhs: parsed.data.amountGhs,
+          status: mockStatus,
+          provider: 'MOCK',
+          providerResponse: JSON.stringify({ mode: 'mock', status: outcome, message: outcome === 'success' ? 'Mock payment succeeded' : 'Mock payment failed' })
+        }
+      });
+
+      if (outcome === 'success') {
+        await prisma.deliveryRequest.update({ where: { id: delivery.id }, data: { status: DeliveryStatus.REQUESTED } });
+        await createUserNotification(req.user!.id, 'Mock payment successful. Your delivery has been requested.', 'PAYMENT_SUCCESS');
+
+        const prescription = await prisma.prescription.findUnique({ where: { id: delivery.prescriptionId } });
+        if (prescription?.pharmacyId) {
+          const admins = await prisma.adminUser.findMany({ where: { pharmacyId: prescription.pharmacyId } });
+          for (const admin of admins) {
+            await createUserNotification(admin.userId, 'Mock payment received. Delivery order is now requested.', 'PAYMENT_SUCCESS');
+          }
+        }
+
+        console.info('[Mock Payment] Successful payment processed', { reference, paymentId: payment.id, deliveryId: delivery.id });
+        res.status(201).json({
+          payment,
+          gateway: {
+            status: true,
+            message: 'Mock payment initialized successfully',
+            data: {
+              authorization_url: `https://mock.paystack.local/checkout/${reference}`,
+              access_code: `mock_${reference}`,
+              reference
+            }
+          },
+          reference,
+          mock: true
+        });
+        return;
+      }
+
+      await prisma.deliveryRequest.update({ where: { id: delivery.id }, data: { status: DeliveryStatus.CANCELLED } });
+      await createUserNotification(req.user!.id, 'Payment failed. Order cancelled.', 'PAYMENT_FAILED');
+
+      const prescription = await prisma.prescription.findUnique({ where: { id: delivery.prescriptionId } });
+      if (prescription?.pharmacyId) {
+        const admins = await prisma.adminUser.findMany({ where: { pharmacyId: prescription.pharmacyId } });
+        for (const admin of admins) {
+          await createUserNotification(admin.userId, 'Mock payment failed. Order cancelled.', 'PAYMENT_FAILED');
+        }
+      }
+
+      console.info('[Mock Payment] Failed payment processed', { reference, paymentId: payment.id, deliveryId: delivery.id });
+      res.status(400).json({
+        error: { message: 'Payment failed. Order cancelled.', requestId: req.requestId },
+        reference,
+        mock: true
+      });
       return;
     }
 
@@ -105,8 +177,19 @@ router.get('/:reference/verify', requireAuth, async (req, res, next) => {
       return;
     }
 
+    console.info('[Paystack Verify] Payment verification initiated', { reference, paymentId: payment.id });
     const verification = await verifyPayment(reference);
-    if (verification.status === 'success') {
+    console.info('[Paystack Verify] Verification response received', {
+      reference,
+      verificationStatus: verification.status,
+      paymentDataStatus: verification.data?.status,
+      amount: verification.data?.amount,
+      paidAt: verification.data?.paid_at
+    });
+
+    // FIX: Check verification.data.status (string), NOT verification.status (boolean)
+    if (verification.data?.status === 'success') {
+      console.info('[Paystack Verify] Payment verified as successful', { reference, amount: verification.data.amount });
       const updated = await prisma.payment.update({
         where: { id: payment.id },
         data: { status: 'PAID', verifiedAt: new Date(), providerResponse: JSON.stringify(verification) }
@@ -124,13 +207,21 @@ router.get('/:reference/verify', requireAuth, async (req, res, next) => {
 
       await createUserNotification(req.user!.id, 'Payment successful. Your delivery has been requested.', 'PAYMENT_SUCCESS');
       await writeAudit({ actorId: req.user!.id, action: 'PAYMENT_VERIFIED', targetEntity: 'Payment', targetId: updated.id, outcome: 'SUCCESS' });
+      console.info('[Paystack Verify] Payment flow completed successfully', { paymentId: updated.id, deliveryId: delivery.id });
       res.json(updated);
       return;
     }
 
+    // Payment verification failed
+    console.error('[Paystack Verify] Payment verification failed', {
+      reference,
+      paymentStatus: verification.data?.status,
+      verificationStatusBoolean: verification.status,
+      message: verification.message
+    });
     await prisma.deliveryRequest.update({ where: { id: payment.deliveryId }, data: { status: DeliveryStatus.CANCELLED } });
-    await createUserNotification(req.user!.id, 'Payment failed. Your delivery request has been cancelled.', 'PAYMENT_FAILED');
-    res.status(400).json({ error: { message: 'Payment not verified', requestId: req.requestId } });
+    await createUserNotification(req.user!.id, `Payment failed (${verification.data?.status}). Your delivery request has been cancelled.`, 'PAYMENT_FAILED');
+    res.status(400).json({ error: { message: `Payment not verified: ${verification.data?.status}`, requestId: req.requestId } });
   } catch (error) {
     next(error);
   }

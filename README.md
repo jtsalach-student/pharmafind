@@ -121,12 +121,16 @@ Implemented route groups:
 
 ## Demonstration Credentials
 
-Seeded users:
+Seeded users (username and email can both be used for login):
 
-- `testuser / Test123!`
-- `campusadmin / Admin123!`
-- `pharmacist1 / Pharma123!`
-- `driver1 / Driver123!`
+| Username | Email | Password | Role |
+|----------|-------|----------|------|
+| testuser | testuser@pharmafind.local | Test123! | User |
+| campusadmin | campusadmin@pharmafind.local | Admin123! | Pharmacy Admin |
+| pharmacist1 | pharmacist1@pharmafind.local | Pharma123! | Pharmacist |
+| driver1 | driver1@pharmafind.local | Driver123! | Driver |
+
+**Login:** Use either username or email address with the password.
 
 ## Security Controls
 

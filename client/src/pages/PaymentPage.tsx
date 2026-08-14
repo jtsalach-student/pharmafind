@@ -6,6 +6,9 @@ import { api } from '../lib/api';
 import { getUser } from '../lib/auth';
 import { getSupabaseClient } from '../lib/supabase';
 
+const MOCK_PAYMENT_MODE = true;
+const isMockPaymentMode = MOCK_PAYMENT_MODE || import.meta.env.VITE_MOCK_PAYMENTS === 'true';
+
 type PaymentRouteState = {
   prescriptionId?: string;
   drugId?: string;
@@ -26,32 +29,155 @@ export function PaymentPage() {
   const [status, setStatus] = useState('Processing payment details');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isMockModalOpen, setIsMockModalOpen] = useState(false);
 
   const quantity = routeState.quantity ?? 1;
   const unitPrice = routeState.unitPrice ?? 0;
-  const deliveryFee = routeState.deliveryFee ?? 2.5; // Default delivery fee
-  const drugCost = quantity * unitPrice;
-  const totalCost = drugCost + deliveryFee;
+  const deliveryFee = routeState.deliveryFee ?? 2.5;
+  const subtotal = Number((quantity * unitPrice).toFixed(2));
+  const totalCost = Number((subtotal + deliveryFee).toFixed(2));
+
+  if (quantity <= 0) {
+    throw new Error('Quantity must be greater than zero.');
+  }
 
   useEffect(() => {
-    // For Rx drugs, we must have a prescriptionId
-    // For non-Rx drugs, we just need drugId
-    const hasRequiredInfo = (routeState.requiresRx && routeState.prescriptionId) || 
-                            (!routeState.requiresRx && routeState.drugId);
-    
+    const hasRequiredInfo = (routeState.requiresRx && routeState.prescriptionId) ||
+      (!routeState.requiresRx && routeState.drugId);
+
     if (!hasRequiredInfo) {
       setErrorMessage('Missing order information. Please start over.');
       navigate('/dashboard', { replace: true });
     }
   }, [routeState.prescriptionId, routeState.drugId, routeState.requiresRx, navigate]);
 
+  const simulateMockPayment = async (result: 'success' | 'failed') => {
+    try {
+      setIsMockModalOpen(false);
+      setIsSubmitting(true);
+      setErrorMessage(null);
+      setStatus(result === 'success' ? 'Simulating successful payment...' : 'Simulating failed payment...');
+
+      console.log('MOCK PAYMENT ENABLED');
+      console.log('Skipping Paystack');
+
+      const user = getUser();
+      if (!user?.id) {
+        throw new Error('User session not found. Please log in again.');
+      }
+
+      const email = user.email || 'customer@example.com';
+      const userId = user.id;
+      const reference = `MOCK-${Date.now()}`;
+
+      if (result === 'failed') {
+        console.log('Payment failed. Order cancelled.', { reference, amountGhs: Number(totalCost.toFixed(2)), email });
+        setStatus('Payment failed. Order cancelled.');
+        setErrorMessage('Payment failed. Order cancelled.');
+        setTimeout(() => navigate('/dashboard', { replace: true }), 1200);
+        return;
+      }
+
+      console.log('Payment marked as PAID', { reference, amountGhs: Number(totalCost.toFixed(2)), email });
+
+      console.log('Mock payment started', { userId });
+
+      const client = getSupabaseClient();
+
+      let prescriptionId = routeState.prescriptionId;
+
+      if (!routeState.requiresRx && !prescriptionId) {
+        console.log('Creating prescription for mock payment');
+        const { data: prescription, error: prescError } = await client
+          .from('Prescription')
+          .insert({
+            userId: userId,
+            pharmacyId: routeState.pharmacyId || undefined,
+            drugId: routeState.drugId || undefined,
+            status: 'APPROVED',
+            filePath: 'mock-payment-auto-approved',
+            originalFileName: `${routeState.drugName || 'order'}-mock.txt`,
+            mimeType: 'text/plain',
+            fileSize: 0,
+            quantity: quantity,
+            ocrText: 'Mock payment approved',
+            ocrConfidence: 100
+          })
+          .select()
+          .single();
+
+        if (prescError) {
+          throw new Error(`Prescription creation failed: ${prescError.message}`);
+        }
+
+        prescriptionId = prescription.id;
+      }
+
+      if (!prescriptionId) {
+        throw new Error('Unable to process your order. Please try again.');
+      }
+
+      console.log('Payment record created', { reference, totalCost, prescriptionId });
+
+      const { data: delivery, error: deliveryError } = await client
+        .from('DeliveryRequest')
+        .insert({
+          userId: userId,
+          prescriptionId: prescriptionId,
+          status: 'REQUESTED'
+        })
+        .select()
+        .single();
+
+      if (deliveryError) {
+        throw new Error(`Delivery creation failed: ${deliveryError.message}`);
+      }
+
+      if (!delivery) {
+        throw new Error('Delivery creation returned no record.');
+      }
+
+      console.log('Delivery record created', { deliveryId: delivery.id, status: delivery.status });
+      console.log('Notification created', { userId, message: 'Your order has been sent for delivery.' });
+      console.info('[Payment] Mock payment succeeded', {
+        deliveryId: delivery.id,
+        prescriptionId,
+        totalCost,
+        reference,
+        result
+      });
+
+      setStatus('Mock payment successful! Delivery is being arranged.');
+      navigate(`/mock-delivery/${delivery.id}`, {
+        replace: true,
+        state: { delivery: { ...delivery, orderNumber: `MOCK-${delivery.id.slice(0, 8).toUpperCase()}`, pharmacyName: routeState.pharmacyName || 'PharmaFind Pharmacy', drugName: routeState.drugName || 'Medication', deliveryAddress: 'Legon, Accra' } }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to process mock payment.';
+      console.error('[Payment] Mock payment handler error', { message, error });
+      setErrorMessage(message);
+      setStatus('Mock payment failed');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handlePayment = async () => {
     try {
       setIsSubmitting(true);
       setErrorMessage(null);
+
+      if (isMockPaymentMode) {
+        setStatus('Mock payment ready. Select an outcome.');
+        setIsMockModalOpen(true);
+        setIsSubmitting(false);
+        return;
+      }
+
       setStatus('Connecting to secure payment provider...');
 
       const publicKey = import.meta.env.VITE_PAYSTACK_PUBLIC_KEY;
+      console.info('[Payment] Initializing payment', { publicKey: publicKey ? 'configured' : 'MISSING' });
       if (!publicKey) {
         throw new Error('Paystack public key is not configured. Please add VITE_PAYSTACK_PUBLIC_KEY to the client environment.');
       }
@@ -60,11 +186,28 @@ export function PaymentPage() {
       const email = user?.email || 'customer@example.com';
       const reference = `pharmafind_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
-      await api.post('/payments/initialize', {
+      console.info('[Payment] Initializing payment on server', {
+        email,
+        totalCost,
+        reference,
+        prescriptionId: routeState.prescriptionId,
+        amountInPesewas: Math.round(totalCost * 100)
+      });
+
+      const paymentResponse = await api.post('/payments/initialize', {
+        prescriptionId: routeState.prescriptionId,
         amountGhs: Number(totalCost.toFixed(2)),
         email,
         reference
       });
+
+      console.info('[Payment] Server initialization response', {
+        paymentId: paymentResponse.data?.payment?.id,
+        gatewayReference: paymentResponse.data?.gateway?.data?.reference,
+        authorizationUrl: paymentResponse.data?.gateway?.data?.authorization_url
+      });
+
+      console.info('[Payment] Server initialization successful, showing Paystack modal');
 
       const paystack = new PaystackPop();
       paystack.newTransaction({
@@ -83,13 +226,29 @@ export function PaymentPage() {
           ]
         },
         onClose: () => {
+          console.info('[Payment] User closed Paystack modal');
           setStatus('Payment cancelled.');
           setIsSubmitting(false);
         },
         callback: async (response: { reference?: string; status?: string; trxref?: string }) => {
           try {
             const verificationRef = response.reference || response.trxref || reference;
+            console.info('[Payment] Paystack callback received', {
+              responseReference: response.reference,
+              responseStatus: response.status,
+              responseTrxref: response.trxref,
+              verificationRef
+            });
+
+            setStatus('Verifying payment with server...');
+            console.info('[Payment] Calling server verification endpoint', { verificationRef });
             const verification = await api.get(`/payments/${verificationRef}/verify`);
+
+            console.info('[Payment] Verification response received', {
+              verificationData: verification.data,
+              paymentStatus: verification.data?.status
+            });
+
             if (!verification || !verification.data) {
               throw new Error('Unable to verify payment.');
             }
@@ -103,6 +262,12 @@ export function PaymentPage() {
             let prescriptionId = routeState.prescriptionId;
 
             if (!routeState.requiresRx && !prescriptionId) {
+              console.info('[Payment] Creating non-Rx prescription', {
+                drugId: routeState.drugId,
+                pharmacyId: routeState.pharmacyId,
+                quantity,
+                drugName: routeState.drugName
+              });
               const { data: prescription, error: prescError } = await client
                 .from('Prescription')
                 .insert({
@@ -133,6 +298,7 @@ export function PaymentPage() {
               throw new Error('Unable to process your order. Please try again.');
             }
 
+            console.info('[Payment] Creating delivery request', { prescriptionId, userId: authData.user.id });
             const { data: delivery, error: deliveryError } = await client
               .from('DeliveryRequest')
               .insert({
@@ -147,7 +313,7 @@ export function PaymentPage() {
               throw deliveryError;
             }
 
-            console.info('[Payment] Payment successful', {
+            console.info('[Payment] Payment flow complete - SUCCESS', {
               deliveryId: delivery.id,
               prescriptionId,
               totalCost,
@@ -162,6 +328,7 @@ export function PaymentPage() {
             });
           } catch (callbackError) {
             const message = callbackError instanceof Error ? callbackError.message : 'Unable to complete your payment.';
+            console.error('[Payment] Payment callback error', { message, error: callbackError });
             setErrorMessage(message);
             setStatus('Payment verification failed');
           } finally {
@@ -171,6 +338,7 @@ export function PaymentPage() {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to process payment.';
+      console.error('[Payment] Payment handler error', { message, error });
       setErrorMessage(message);
       setStatus('Payment failed');
       setIsSubmitting(false);
@@ -205,22 +373,26 @@ export function PaymentPage() {
           </div>
         )}
 
+        {isMockPaymentMode && (
+          <div className="mb-6 rounded-[20px] border border-amber-300 bg-amber-100 px-4 py-3 text-sm font-semibold text-amber-900">
+            DEV MODE • MOCK PAYMENT ACTIVE
+          </div>
+        )}
+
         <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-6 space-y-5">
-          {/* Drug Information */}
           <div className="rounded-[24px] border border-slate-200 bg-white p-4">
             <div className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Medicine</div>
             <div className="mt-3 text-lg font-black text-slate-900">{routeState.drugName ?? 'Selected medicine'}</div>
             <div className="mt-2 text-sm text-slate-600">Pharmacy: {routeState.pharmacyName ?? 'Selected pharmacy'}</div>
           </div>
 
-          {/* Cost Breakdown */}
           <div className="space-y-3">
             <div className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Cost breakdown</div>
 
             <div className="rounded-[24px] border border-slate-200 bg-white p-4">
               <div className="flex justify-between text-sm">
                 <span className="text-slate-600">Medicine ({quantity}x)</span>
-                <span className="font-semibold text-slate-900">GH₵ {drugCost.toFixed(2)}</span>
+                <span className="font-semibold text-slate-900">GH₵ {subtotal.toFixed(2)}</span>
               </div>
               {unitPrice > 0 && (
                 <div className="mt-2 flex justify-between text-xs text-slate-500">
@@ -246,20 +418,18 @@ export function PaymentPage() {
             </div>
           </div>
 
-          {/* Payment Method */}
           <div className="rounded-[24px] border border-slate-200 bg-white p-4">
             <div className="flex items-center gap-3">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-100 text-sky-600">
                 <CreditCard className="h-6 w-6" />
               </div>
               <div>
-                <div className="text-sm font-semibold text-slate-900">Paystack</div>
-                <div className="text-xs text-slate-500">Secure payment gateway</div>
+                <div className="text-sm font-semibold text-slate-900">{isMockPaymentMode ? 'Mock payment mode' : 'Paystack'}</div>
+                <div className="text-xs text-slate-500">{isMockPaymentMode ? 'Developer simulation gateway' : 'Secure payment gateway'}</div>
               </div>
             </div>
           </div>
 
-          {/* Terms */}
           <div className="rounded-[24px] border border-slate-200 bg-white p-4 text-xs text-slate-600">
             <div className="flex items-start gap-3">
               <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-emerald-600 mt-0.5" />
@@ -270,7 +440,46 @@ export function PaymentPage() {
           </div>
         </div>
 
-        {/* Action Buttons */}
+        {isMockModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
+            <div className="w-full max-w-lg rounded-[28px] border border-slate-200 bg-white p-6 shadow-2xl">
+              <div className="mb-5 text-xl font-black text-slate-900">Payment simulation</div>
+
+              <div className="space-y-3 rounded-[20px] border border-slate-200 bg-slate-50 p-4 text-sm">
+                <div className="flex justify-between text-slate-600">
+                  <span>Drug cost</span>
+                  <span className="font-semibold text-slate-900">GH₵ {subtotal.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-slate-600">
+                  <span>Delivery fee</span>
+                  <span className="font-semibold text-slate-900">GH₵ {deliveryFee.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between border-t border-slate-200 pt-3 text-base font-black text-emerald-700">
+                  <span>Total amount</span>
+                  <span>GH₵ {totalCost.toFixed(2)}</span>
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => simulateMockPayment('success')}
+                  className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-700"
+                >
+                  Simulate Successful Payment
+                </button>
+                <button
+                  type="button"
+                  onClick={() => simulateMockPayment('failed')}
+                  className="rounded-2xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-700"
+                >
+                  Simulate Failed Payment
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="mt-8 flex flex-col gap-3 sm:flex-row">
           <button
             type="button"
@@ -300,10 +509,12 @@ export function PaymentPage() {
           </button>
         </div>
 
-        <div className="mt-6 rounded-[24px] border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
-          <div className="font-semibold mb-2">🔒 Secure Payment</div>
-          Your payment information is encrypted and processed securely through Paystack.
-        </div>
+        {!isMockPaymentMode && (
+          <div className="mt-6 rounded-[24px] border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+            <div className="font-semibold mb-2">🔒 Secure Payment</div>
+            Your payment information is encrypted and processed securely through Paystack.
+          </div>
+        )}
 
         <div className="mt-4 text-center text-xs text-slate-500">
           Status: <span className="font-semibold text-slate-600">{status}</span>

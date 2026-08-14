@@ -165,6 +165,11 @@ export function SearchPage() {
                   </div>
                 </div>
 
+                <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-3">
+                  <div className="text-[10px] uppercase tracking-[0.18em] text-emerald-700">Price</div>
+                  <div className="mt-1 text-lg font-black text-emerald-700">GH₵ {Number(result.price ?? 0).toFixed(2)}</div>
+                </div>
+
                 <div className="mt-5 flex flex-col gap-3 sm:flex-row">
                   <button
                     type="button"

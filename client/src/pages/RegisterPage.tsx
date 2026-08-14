@@ -5,13 +5,14 @@ import { useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
-import { normalizeRoleInput, type UserRole } from '../lib/auth';
-import { getSupabaseClient } from '../lib/supabase';
+import { getRoleDashboard, normalizeRoleInput, setSession, type UserRole } from '../lib/auth';
+import { api } from '../lib/api';
 
 const validRoles = ['USER', 'PHARMACIST', 'PHARMACY_ADMIN', 'DRIVER', 'SYSTEM_ADMIN'] as const;
 
 const registerSchema = z
   .object({
+    username: z.string().trim().min(3, 'Username must be at least 3 characters').regex(/^[a-zA-Z0-9_-]+$/, 'Username can only contain letters, numbers, underscores, and dashes'),
     fullName: z.string().trim().min(2, 'Full name is required').refine((value) => value.split(/\s+/).length >= 2, 'Enter at least first and last name'),
     email: z.string().trim().email('Enter a valid email'),
     phone: z.string().trim().regex(/^\+233[2,3,5,6,7,8,9][0-9]{8}$/, 'Enter a valid Ghana phone number'),
@@ -113,138 +114,50 @@ export function RegisterPage() {
     try {
       submitLockRef.current = true;
       setStatusMessage(null);
-      const client = getSupabaseClient();
-      const redirectUrl = `${window.location.origin}/login`;
 
-      console.info('[Signup] auth request starting', {
-        email: values.email,
-        role: values.role,
-        redirectUrl,
-        timestamp: new Date().toISOString()
-      });
-
-      const { data: authData, error: authError } = await client.auth.signUp({
-        email: values.email,
+      const response = await api.post('/auth/register', {
+        username: values.username.trim().toLowerCase(),
+        email: values.email.trim().toLowerCase(),
         password: values.password,
-        options: {
-          emailRedirectTo: redirectUrl,
-          data: {
-            full_name: values.fullName,
-            phone: values.phone,
-            role: values.role
-          }
-        }
-      });
-
-      console.info('[Signup] auth response', {
-        userId: authData.user?.id,
-        email: authData.user?.email,
-        sessionPresent: Boolean(authData.session),
-        timestamp: new Date().toISOString()
-      });
-
-      if (authError) {
-        console.error('[Signup] auth error', {
-          message: authError.message,
-          status: authError.status,
-          code: authError.code,
-          timestamp: new Date().toISOString()
-        });
-        throw authError;
-      }
-
-      const userId = authData.user?.id;
-      if (!userId) {
-        const noUserError = new Error('Auth created user but no user ID returned from Supabase');
-        console.error('[Signup] missing auth user id', {
-          error: noUserError.message,
-          timestamp: new Date().toISOString()
-        });
-        throw noUserError;
-      }
-
-      if (!['USER', 'PHARMACIST', 'PHARMACY_ADMIN', 'DRIVER', 'SYSTEM_ADMIN'].includes(values.role)) {
-        throw new Error('Invalid role selected. Please choose a valid account type.');
-      }
-
-      const nowIso = new Date();
-      const profilePayload = {
-        id: userId,
-        username: values.email,
-        passwordHash: 'supabase-auth',
         fullName: values.fullName,
         phone: values.phone,
-        role: values.role,
-        createdAt: nowIso,
-        updatedAt: nowIso
+        role: values.role
+      });
+
+      const { token, user } = response.data as {
+        token: string;
+        user: { id?: string; username?: string; email?: string; role?: UserRole | string };
       };
 
-      console.info('[Signup] profile insert started', {
-        userId,
-        email: values.email,
-        role: values.role,
-        timestamp: new Date().toISOString()
-      });
-
-      const { data: profileData, error: profileError } = await client
-        .from('User')
-        .insert(profilePayload)
-        .select()
-        .single();
-
-      console.info('[Signup] profile insert response', {
-        userId,
-        profileData,
-        timestamp: new Date().toISOString()
-      });
-
-      if (profileError) {
-        console.error('[Signup] profile insert error', {
-          message: profileError.message,
-          code: profileError.code,
-          details: profileError.details,
-          timestamp: new Date().toISOString()
-        });
-        throw profileError;
+      if (!token) {
+        throw new Error('The server did not return an auth token.');
       }
 
-      console.info('[Signup] user profile created successfully', {
-        userId,
-        email: values.email,
-        timestamp: new Date().toISOString()
-      });
-
-      if (authData.session) {
-        console.info('[Signup] session returned immediately; clearing session because email verification is required', {
-          userId,
-          targetRole: values.role,
-          timestamp: new Date().toISOString()
-        });
+      if (!user?.id) {
+        throw new Error('The server did not return a user ID.');
       }
 
-      console.info('[Signup] email confirmation required; redirecting to check-email page', {
-        email: values.email,
-        timestamp: new Date().toISOString()
+      const role = normalizeRoleInput((user?.role as UserRole | string | undefined) ?? values.role);
+      setSession(token, {
+        id: user.id,
+        name: values.fullName,
+        email: user?.email || values.email,
+        role: role ?? values.role
       });
 
-      sessionStorage.setItem('pharmafind_pending_signup_email', values.email);
       setStatusMessage({
         type: 'success',
-        text: 'Account created successfully. Please check your email to confirm your account.'
+        text: 'Account created successfully.'
       });
 
-      navigate('/check-email', {
-        replace: true,
-        state: { email: values.email }
-      });
+      navigate(getRoleDashboard(role ?? values.role), { replace: true });
     } catch (error: any) {
-      const errorMessage = getSignupErrorMessage(error);
+      const errorMessage = error?.response?.data?.error?.message || getSignupErrorMessage(error);
 
       console.error('[Signup] signup error caught', {
         errorMessage,
         status: error?.status,
-        code: error?.code,
-        raw: error,
+        response: error?.response?.data,
         timestamp: new Date().toISOString()
       });
 
@@ -337,6 +250,12 @@ export function RegisterPage() {
               {errors.fullName && <p className="mt-2 text-sm text-red-600">{errors.fullName.message}</p>}
             </div>
 
+            <div>
+              <label htmlFor="username" className="mb-2 block text-sm font-semibold text-slate-700">Username</label>
+              <input id="username" className="input-shell" placeholder="letters, numbers, dash, underscore" {...register('username')} aria-invalid={!!errors.username} />
+              {errors.username && <p className="mt-2 text-sm text-red-600">{errors.username.message}</p>}
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label htmlFor="email" className="mb-2 block text-sm font-semibold text-slate-700">Email</label>
@@ -354,11 +273,11 @@ export function RegisterPage() {
             <div>
               <label htmlFor="role" className="mb-2 block text-sm font-semibold text-slate-700">Role</label>
               <select id="role" className="input-shell" {...register('role')} aria-invalid={!!errors.role} defaultValue="USER">
-                <option value="USER">User</option>
+                <option value="USER">Patient</option>
                 <option value="PHARMACIST">Pharmacist</option>
-                <option value="PHARMACY_ADMIN">Hospital Staff</option>
+                <option value="PHARMACY_ADMIN">Pharmacy Admin</option>
                 <option value="DRIVER">Driver</option>
-                <option value="SYSTEM_ADMIN">Admin</option>
+                <option value="SYSTEM_ADMIN">System Admin</option>
               </select>
               {errors.role && <p className="mt-2 text-sm text-red-600">{errors.role.message}</p>}
             </div>

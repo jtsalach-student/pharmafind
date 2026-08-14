@@ -6,10 +6,10 @@ import { useForm } from 'react-hook-form';
 import { Link, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { getUser, getRoleDashboard, normalizeRoleInput, setSession, type UserSession, type UserRole } from '../lib/auth';
-import { getSupabaseClient } from '../lib/supabase';
+import { api } from '../lib/api';
 
 const loginSchema = z.object({
-  email: z.string().trim().email('Enter a valid email'),
+  username: z.string().trim().min(1, 'Enter your username or email'),
   password: z.string().min(6, 'Password must be at least 6 characters')
 });
 
@@ -36,61 +36,45 @@ export function LoginPage() {
   const onSubmit = async (values: LoginForm) => {
     try {
       setStatusMessage(null);
-      const client = getSupabaseClient();
-      console.info('[Supabase] login request', {
-        email: values.email,
-        origin: window.location.origin
-      });
 
-      const { data, error } = await client.auth.signInWithPassword({
-        email: values.email,
+      const response = await api.post('/auth/login', {
+        username: values.username.trim(),
         password: values.password
       });
 
-      console.info('[Supabase] login response', data);
-
-      if (error) {
-        console.error('[Supabase] login auth error', error);
-        throw error;
-      }
-
-      const authUser = data.user;
-      if (!authUser) {
-        throw new Error('Supabase did not return an authenticated user.');
-      }
-
-      if (!authUser.email_confirmed_at) {
-        await client.auth.signOut();
-        throw new Error('Please verify your email before signing in.');
-      }
-
-      const accessToken = data.session?.access_token;
-      if (!accessToken) {
-        throw new Error('Supabase did not return an authenticated session.');
-      }
-
-      const role = normalizeRoleInput((authUser.user_metadata?.role as UserRole | string | undefined) ?? 'USER');
-      const session: UserSession = {
-        name: authUser.user_metadata?.full_name || authUser.email || values.email,
-        email: authUser.email || values.email,
-        role
+      const { token, user } = response.data as {
+        token: string;
+        user: { id?: string; username?: string; email?: string; role?: UserRole | string };
       };
 
-      setSession(accessToken, session);
+      if (!token) {
+        throw new Error('Authentication token was not returned by the server.');
+      }
+
+      if (!user?.id) {
+        throw new Error('The server did not return a user ID.');
+      }
+
+      const role = normalizeRoleInput((user?.role as UserRole | string | undefined) ?? 'USER');
+      const session: UserSession = {
+        id: user.id,
+        name: user?.username || values.username,
+        email: user?.email || values.username,
+        role: role ?? 'USER'
+      };
+
+      setSession(token, session);
       setStatusMessage({ type: 'success', text: 'Signed in successfully.' });
-      navigate(getRoleDashboard(role), { replace: true });
+      navigate(getRoleDashboard(session.role), { replace: true });
     } catch (error: any) {
-      console.error('[Supabase] login failure', {
+      console.error('[Login] backend login failure', {
         name: error?.name,
         message: error?.message,
         status: error?.status,
-        code: error?.code,
-        details: error?.details,
-        hint: error?.hint,
-        error_description: error?.error_description
+        response: error?.response?.data
       });
 
-      const message = error?.message || error?.error_description || 'Unable to sign in. Please check your credentials.';
+      const message = error?.response?.data?.error?.message || error?.message || 'Unable to sign in. Please check your credentials.';
       setStatusMessage({ type: 'error', text: message });
     }
   };
@@ -179,9 +163,9 @@ export function LoginPage() {
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
             <div>
-              <label htmlFor="email" className="mb-2 block text-sm font-semibold text-slate-700">Email</label>
-              <input id="email" type="email" className="input-shell" {...register('email')} aria-invalid={!!errors.email} />
-              {errors.email && <p className="mt-2 text-sm text-red-600">{errors.email.message}</p>}
+              <label htmlFor="username" className="mb-2 block text-sm font-semibold text-slate-700">Username or email</label>
+              <input id="username" type="text" className="input-shell" {...register('username')} aria-invalid={!!errors.username} />
+              {errors.username && <p className="mt-2 text-sm text-red-600">{errors.username.message}</p>}
             </div>
 
             <div>

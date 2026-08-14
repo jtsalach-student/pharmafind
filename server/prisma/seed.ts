@@ -1,7 +1,12 @@
 import bcrypt from 'bcryptjs';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient, Role } from '@prisma/client';
+import dotenv from 'dotenv';
 
-const prisma = new PrismaClient();
+dotenv.config();
+
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+const prisma = new PrismaClient({ adapter });
 
 async function main() {
   await prisma.gPSLocation.deleteMany();
@@ -27,31 +32,31 @@ async function main() {
   ]);
 
   const drugData = [
-    ['Paracetamol', 'Panadol', 'Pain Relief', false],
-    ['Ibuprofen', 'Brufen', 'Pain Relief', false],
-    ['Amoxicillin', 'Amoxil', 'Antibiotic', true],
-    ['Metformin', 'Glucophage', 'Diabetes', true],
-    ['Insulin', 'Insulatard', 'Diabetes', true],
-    ['Salbutamol', 'Salbutamol Inhaler', 'Respiratory', true],
-    ['Adrenaline', 'Adrenaline Injection', 'Emergency', true],
-    ['Epinephrine', 'EpiPen', 'Emergency', true],
-    ['Glucagon', 'Glucagon', 'Emergency', true],
-    ['Hydrocortisone', 'Hydrocortisone Injection', 'Emergency', true],
-    ['Nitroglycerin', 'Nitroglycerin Tablets', 'Emergency', true],
-    ['ORS', 'ORS', 'Emergency', false],
-    ['Cetirizine', 'Zyrtec', 'Allergy', false],
-    ['Loratadine', 'Clarityn', 'Allergy', false],
-    ['Omeprazole', 'Losec', 'Gastro', false],
-    ['Aspirin', 'Ascard', 'Cardio', false],
-    ['Atorvastatin', 'Lipitor', 'Cardio', true],
-    ['Ciprofloxacin', 'Cipro', 'Antibiotic', true],
-    ['Azithromycin', 'Zithromax', 'Antibiotic', true],
-    ['Vitamin C', 'Ceevit', 'Supplements', false]
+    ['Paracetamol', 'Panadol', 'Pain Relief', false, 18.5],
+    ['Ibuprofen', 'Brufen', 'Pain Relief', false, 22.0],
+    ['Amoxicillin', 'Amoxil', 'Antibiotic', true, 32.5],
+    ['Metformin', 'Glucophage', 'Diabetes', true, 28.0],
+    ['Insulin', 'Insulatard', 'Diabetes', true, 46.0],
+    ['Salbutamol', 'Salbutamol Inhaler', 'Respiratory', true, 42.5],
+    ['Adrenaline', 'Adrenaline Injection', 'Emergency', true, 58.5],
+    ['Epinephrine', 'EpiPen', 'Emergency', true, 62.0],
+    ['Glucagon', 'Glucagon', 'Emergency', true, 68.5],
+    ['Hydrocortisone', 'Hydrocortisone Injection', 'Emergency', true, 74.0],
+    ['Nitroglycerin', 'Nitroglycerin Tablets', 'Emergency', true, 25.5],
+    ['ORS', 'ORS', 'Emergency', false, 12.0],
+    ['Cetirizine', 'Zyrtec', 'Allergy', false, 15.75],
+    ['Loratadine', 'Clarityn', 'Allergy', false, 17.5],
+    ['Omeprazole', 'Losec', 'Gastro', false, 19.0],
+    ['Aspirin', 'Ascard', 'Cardio', false, 14.5],
+    ['Atorvastatin', 'Lipitor', 'Cardio', true, 35.5],
+    ['Ciprofloxacin', 'Cipro', 'Antibiotic', true, 31.0],
+    ['Azithromycin', 'Zithromax', 'Antibiotic', true, 38.0],
+    ['Vitamin C', 'Ceevit', 'Supplements', false, 11.5]
   ] as const;
 
   const drugs = await Promise.all(
-    drugData.map(([genericName, brandName, category, requiresRx]) =>
-      prisma.drug.create({ data: { genericName, brandName, category, requiresRx, isEmergency: category === 'Emergency' || brandName === 'Salbutamol Inhaler' || brandName === 'Insulatard' } })
+    drugData.map(([genericName, brandName, category, requiresRx, price]) =>
+      prisma.drug.create({ data: { genericName, brandName, category, requiresRx, price, isEmergency: category === 'Emergency' || brandName === 'Salbutamol Inhaler' || brandName === 'Insulatard' } })
     )
   );
 
@@ -69,10 +74,10 @@ async function main() {
   }
 
   const [user, admin, pharmacistUser, driverUser] = await Promise.all([
-    prisma.user.create({ data: { username: 'testuser', passwordHash: await bcrypt.hash('Test123!', 10), role: Role.USER, phone: '+233201111111', createdAt: new Date(), updatedAt: new Date() } }),
-    prisma.user.create({ data: { username: 'campusadmin', passwordHash: await bcrypt.hash('Admin123!', 10), role: Role.PHARMACY_ADMIN, phone: '+233202222222', createdAt: new Date(), updatedAt: new Date() } }),
-    prisma.user.create({ data: { username: 'pharmacist1', passwordHash: await bcrypt.hash('Pharma123!', 10), role: Role.PHARMACIST, phone: '+233203333333', createdAt: new Date(), updatedAt: new Date() } }),
-    prisma.user.create({ data: { username: 'driver1', passwordHash: await bcrypt.hash('Driver123!', 10), role: Role.DRIVER, phone: '+233204444444', createdAt: new Date(), updatedAt: new Date() } })
+    prisma.user.create({ data: { username: 'testuser', email: 'testuser@pharmafind.local', passwordHash: await bcrypt.hash('Test123!', 10), role: Role.USER, phone: '+233201111111', createdAt: new Date(), updatedAt: new Date() } }),
+    prisma.user.create({ data: { username: 'campusadmin', email: 'campusadmin@pharmafind.local', passwordHash: await bcrypt.hash('Admin123!', 10), role: Role.PHARMACY_ADMIN, phone: '+233202222222', createdAt: new Date(), updatedAt: new Date() } }),
+    prisma.user.create({ data: { username: 'pharmacist1', email: 'pharmacist1@pharmafind.local', passwordHash: await bcrypt.hash('Pharma123!', 10), role: Role.PHARMACIST, phone: '+233203333333', createdAt: new Date(), updatedAt: new Date() } }),
+    prisma.user.create({ data: { username: 'driver1', email: 'driver1@pharmafind.local', passwordHash: await bcrypt.hash('Driver123!', 10), role: Role.DRIVER, phone: '+233204444444', createdAt: new Date(), updatedAt: new Date() } })
   ]);
 
   await prisma.adminUser.create({ data: { userId: admin.id, pharmacyId: pharmacies[0].id } });

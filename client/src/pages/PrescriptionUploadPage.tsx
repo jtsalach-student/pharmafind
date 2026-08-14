@@ -9,6 +9,8 @@ type PrescriptionRouteState = {
   drugId?: string;
   drugName?: string;
   quantity?: number;
+  unitPrice?: number;
+  deliveryFee?: number;
   requiresRx?: boolean;
 };
 
@@ -49,7 +51,7 @@ export function PrescriptionUploadPage() {
       return;
     }
     if (!deliveryAddress.trim() || !phoneNumber.trim() || quantity <= 0) {
-      setErrorMessage('Quantity, delivery address, and phone number are required.');
+      setErrorMessage('Quantity must be greater than zero, and delivery address/phone number are required.');
       return;
     }
 
@@ -87,8 +89,8 @@ export function PrescriptionUploadPage() {
           pharmacyId: routeState.pharmacy?.pharmacyId,
           pharmacyName: routeState.pharmacy?.pharmacyName,
           quantity,
-          unitPrice: 0,
-          deliveryFee: 2.5,
+          unitPrice: routeState.unitPrice ?? 0,
+          deliveryFee: routeState.deliveryFee ?? 2.5,
           requiresRx: true
         }
       });
@@ -208,6 +210,8 @@ export function PrescriptionUploadPage() {
               <div className="rounded-2xl bg-white p-4 text-sm leading-6 text-slate-700 space-y-1">
                 <div>Medication: {routeState.drugName ?? 'Selected drug'}</div>
                 <div>Quantity: {quantity}</div>
+                <div>Unit price: GH₵ {Number(routeState.unitPrice ?? 0).toFixed(2)}</div>
+                <div>Subtotal: GH₵ {(Number(routeState.unitPrice ?? 0) * quantity).toFixed(2)}</div>
                 <div>Pharmacy: {routeState.pharmacy?.pharmacyName ?? 'Selected pharmacy'}</div>
                 <div>Verification: Pending pharmacist review</div>
               </div>
