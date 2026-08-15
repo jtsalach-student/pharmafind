@@ -5,8 +5,8 @@ import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
-import { getUser, getRoleDashboard, normalizeRoleInput, setSession, type UserSession, type UserRole } from '../lib/auth';
-import { api } from '../lib/api';
+import { getUser, getRoleDashboard } from '../lib/auth';
+import { loginUser } from '../lib/authService';
 
 const loginSchema = z.object({
   username: z.string().trim().min(1, 'Enter your username or email'),
@@ -37,44 +37,16 @@ export function LoginPage() {
     try {
       setStatusMessage(null);
 
-      const response = await api.post('/auth/login', {
-        username: values.username.trim(),
+      const result = await loginUser({
+        usernameOrEmail: values.username,
         password: values.password
       });
 
-      const { token, user } = response.data as {
-        token: string;
-        user: { id?: string; username?: string; email?: string; role?: UserRole | string };
-      };
-
-      if (!token) {
-        throw new Error('Authentication token was not returned by the server.');
-      }
-
-      if (!user?.id) {
-        throw new Error('The server did not return a user ID.');
-      }
-
-      const role = normalizeRoleInput((user?.role as UserRole | string | undefined) ?? 'USER');
-      const session: UserSession = {
-        id: user.id,
-        name: user?.username || values.username,
-        email: user?.email || values.username,
-        role: role ?? 'USER'
-      };
-
-      setSession(token, session);
       setStatusMessage({ type: 'success', text: 'Signed in successfully.' });
-      navigate(getRoleDashboard(session.role), { replace: true });
+      navigate(getRoleDashboard(result.user.role), { replace: true });
     } catch (error: any) {
-      console.error('[Login] backend login failure', {
-        name: error?.name,
-        message: error?.message,
-        status: error?.status,
-        response: error?.response?.data
-      });
-
-      const message = error?.response?.data?.error?.message || error?.message || 'Unable to sign in. Please check your credentials.';
+      console.error('[Login] login failure:', error?.message);
+      const message = error?.message || 'Unable to sign in. Please check your credentials.';
       setStatusMessage({ type: 'error', text: message });
     }
   };

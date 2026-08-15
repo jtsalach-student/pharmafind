@@ -5,8 +5,8 @@ import { useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
-import { getRoleDashboard, normalizeRoleInput, setSession, type UserRole } from '../lib/auth';
-import { api } from '../lib/api';
+import { getRoleDashboard, normalizeRoleInput, type UserRole } from '../lib/auth';
+import { registerUser } from '../lib/authService';
 import { createInAppNotification, notifyUsersWithRole } from '../lib/notifications';
 
 const validRoles = ['USER', 'PHARMACIST', 'PHARMACY_ADMIN', 'DRIVER', 'SYSTEM_ADMIN'] as const;
@@ -116,7 +116,7 @@ export function RegisterPage() {
       submitLockRef.current = true;
       setStatusMessage(null);
 
-      const response = await api.post('/auth/register', {
+      const result = await registerUser({
         username: values.username.trim().toLowerCase(),
         email: values.email.trim().toLowerCase(),
         password: values.password,
@@ -125,57 +125,27 @@ export function RegisterPage() {
         role: values.role
       });
 
-      const { token, user } = response.data as {
-        token: string;
-        user: { id?: string; username?: string; email?: string; role?: UserRole | string };
-      };
-
-      if (!token) {
-        throw new Error('The server did not return an auth token.');
-      }
-
-      if (!user?.id) {
-        throw new Error('The server did not return a user ID.');
-      }
-
-      const role = normalizeRoleInput((user?.role as UserRole | string | undefined) ?? values.role);
-      setSession(token, {
-        id: user.id,
-        name: values.fullName,
-        email: user?.email || values.email,
-        role: role ?? values.role
-      });
+      const role = result.user.role;
 
       // Dispatch welcome in-app notification to new user
       void createInAppNotification(
-        user.id,
-        `Welcome to PharmaFind, ${values.fullName || values.username}! Your ${role ?? values.role} account has been created successfully.`,
+        result.user.id,
+        `Welcome to PharmaFind, ${values.fullName || values.username}! Your ${role} account has been created successfully.`,
         'ACCOUNT_CREATED'
       );
 
       // Dispatch alert to system admins
       void notifyUsersWithRole(
         'SYSTEM_ADMIN',
-        `New User Registered: ${values.fullName || values.username} (${values.email}) joined as ${role ?? values.role}.`,
+        `New User Registered: ${values.fullName || values.username} (${values.email}) joined as ${role}.`,
         'ADMIN_USER_REGISTERED'
       );
 
-      setStatusMessage({
-        type: 'success',
-        text: 'Account created successfully.'
-      });
-
-      navigate(getRoleDashboard(role ?? values.role), { replace: true });
+      setStatusMessage({ type: 'success', text: 'Account created successfully! Redirecting...' });
+      setTimeout(() => navigate(getRoleDashboard(role), { replace: true }), 800);
     } catch (error: any) {
-      const errorMessage = error?.response?.data?.error?.message || getSignupErrorMessage(error);
-
-      console.error('[Signup] signup error caught', {
-        errorMessage,
-        status: error?.status,
-        response: error?.response?.data,
-        timestamp: new Date().toISOString()
-      });
-
+      console.error('[Register] registration failure:', error?.message);
+      const errorMessage = getSignupErrorMessage(error);
       setStatusMessage({
         type: 'error',
         text: errorMessage
