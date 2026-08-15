@@ -18,9 +18,9 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getAdminOperationsData, type AdminOperationsData } from '../lib/data';
+import { getAdminOperationsData, updateDrug, updatePharmacy, type AdminOperationsData, type DrugRecord, type PharmacyRecord } from '../lib/data';
 
-type AdminTab = 'overview' | 'users' | 'pharmacies' | 'inventory' | 'audit';
+type AdminTab = 'overview' | 'users' | 'pharmacies' | 'drugs' | 'inventory' | 'audit';
 
 export function AdminAuditPage() {
   const [data, setData] = useState<AdminOperationsData | null>(null);
@@ -33,6 +33,60 @@ export function AdminAuditPage() {
   const [auditFilter, setAuditFilter] = useState<'ALL' | 'SUCCESS' | 'FAILED'>('ALL');
   const [selectedAuditLog, setSelectedAuditLog] = useState<any | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
+
+  const [editingDrug, setEditingDrug] = useState<DrugRecord | null>(null);
+  const [editingPharmacy, setEditingPharmacy] = useState<PharmacyRecord | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSaveDrug = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingDrug) return;
+    try {
+      setIsSaving(true);
+      setError(null);
+      await updateDrug(editingDrug.id, {
+        genericName: editingDrug.genericName,
+        brandName: editingDrug.brandName,
+        category: editingDrug.category,
+        drugType: editingDrug.drugType,
+        strength: editingDrug.strength,
+        indication: editingDrug.indication,
+        requiresRx: editingDrug.requiresRx,
+        isEmergency: editingDrug.isEmergency
+      });
+      await fetchData(true);
+      setEditingDrug(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save drug');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSavePharmacy = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingPharmacy) return;
+    try {
+      setIsSaving(true);
+      setError(null);
+      await updatePharmacy(editingPharmacy.id, {
+        name: editingPharmacy.name,
+        address: editingPharmacy.address,
+        phone: editingPharmacy.phone,
+        latitude: editingPharmacy.latitude,
+        longitude: editingPharmacy.longitude,
+        opensAt: editingPharmacy.opensAt,
+        closesAt: editingPharmacy.closesAt
+      });
+      await fetchData(true);
+      setEditingPharmacy(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save pharmacy');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
 
   const fetchData = async (isManualRefresh = false) => {
     try {
@@ -464,6 +518,17 @@ export function AdminAuditPage() {
             </button>
             <button
               type="button"
+              onClick={() => { setActiveTab('drugs'); setSearchQuery(''); }}
+              className={`rounded-xl px-4 py-2 text-xs font-bold transition-all ${
+                activeTab === 'drugs'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Drugs ({data?.drugs?.total ?? 0})
+            </button>
+            <button
+              type="button"
               onClick={() => { setActiveTab('inventory'); setSearchQuery(''); }}
               className={`rounded-xl px-4 py-2 text-xs font-bold transition-all ${
                 activeTab === 'inventory'
@@ -827,6 +892,74 @@ export function AdminAuditPage() {
                       </span>
                     </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditingPharmacy(pharmacy)}
+                    className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                  >
+                    Edit Pharmacy
+                  </button>
+                </div>
+              ))}
+            </motion.div>
+          )}
+
+          {/* TAB 3.5: DRUGS */}
+          {activeTab === 'drugs' && (
+            <motion.div
+              key="tab-drugs"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+              className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+            >
+              {data?.drugs?.list?.map((drug) => (
+                <div
+                  key={drug.id}
+                  className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm space-y-3 hover:shadow-md transition-shadow flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h4 className="font-bold text-slate-900 text-base">{drug.genericName}</h4>
+                        <p className="text-xs text-slate-500 mt-0.5">{drug.brandName}</p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1">
+                        {drug.isEmergency && (
+                          <span className="rounded-full bg-red-100 px-2 py-0.5 text-[9px] font-bold text-red-800">
+                            EMERGENCY
+                          </span>
+                        )}
+                        {drug.requiresRx && (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-800">
+                            RX REQ
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-3 rounded-xl bg-slate-50 p-3 space-y-1 text-xs">
+                      <div className="flex justify-between text-slate-600">
+                        <span>Category:</span>
+                        <span className="font-semibold text-slate-800">{drug.category || '—'}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-600">
+                        <span>Type:</span>
+                        <span className="font-semibold text-slate-800">{drug.drugType || '—'}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-600">
+                        <span>Strength:</span>
+                        <span className="font-semibold text-slate-800">{drug.strength || '—'}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditingDrug(drug)}
+                    className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                  >
+                    Edit Drug
+                  </button>
                 </div>
               ))}
             </motion.div>
@@ -1056,6 +1189,225 @@ export function AdminAuditPage() {
               Close Inspector
             </button>
           </div>
+        </div>
+      )}
+
+      {/* DRUG EDIT MODAL */}
+      {editingDrug && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm overflow-y-auto">
+          <form onSubmit={handleSaveDrug} className="w-full max-w-2xl rounded-[28px] bg-white p-6 shadow-2xl my-8">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+              <h3 className="font-bold text-slate-900 text-lg">Edit Drug Details</h3>
+              <button
+                type="button"
+                onClick={() => setEditingDrug(null)}
+                className="rounded-full bg-slate-100 p-1.5 text-slate-500 hover:text-slate-800"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Generic Name</label>
+                <input
+                  type="text"
+                  required
+                  value={editingDrug.genericName || ''}
+                  onChange={e => setEditingDrug({ ...editingDrug, genericName: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Brand Name</label>
+                <input
+                  type="text"
+                  required
+                  value={editingDrug.brandName || ''}
+                  onChange={e => setEditingDrug({ ...editingDrug, brandName: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Category</label>
+                <input
+                  type="text"
+                  value={editingDrug.category || ''}
+                  onChange={e => setEditingDrug({ ...editingDrug, category: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Drug Type</label>
+                <input
+                  type="text"
+                  value={editingDrug.drugType || ''}
+                  onChange={e => setEditingDrug({ ...editingDrug, drugType: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Strength</label>
+                <input
+                  type="text"
+                  value={editingDrug.strength || ''}
+                  onChange={e => setEditingDrug({ ...editingDrug, strength: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Indication</label>
+                <input
+                  type="text"
+                  value={editingDrug.indication || ''}
+                  onChange={e => setEditingDrug({ ...editingDrug, indication: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-sm"
+                />
+              </div>
+              <div className="flex items-center gap-2 mt-4">
+                <input
+                  type="checkbox"
+                  id="requiresRx"
+                  checked={editingDrug.requiresRx || false}
+                  onChange={e => setEditingDrug({ ...editingDrug, requiresRx: e.target.checked })}
+                  className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-600"
+                />
+                <label htmlFor="requiresRx" className="text-sm font-medium text-slate-700">Requires Prescription</label>
+              </div>
+              <div className="flex items-center gap-2 mt-4">
+                <input
+                  type="checkbox"
+                  id="isEmergency"
+                  checked={editingDrug.isEmergency || false}
+                  onChange={e => setEditingDrug({ ...editingDrug, isEmergency: e.target.checked })}
+                  className="h-4 w-4 rounded border-slate-300 text-red-600 focus:ring-red-600"
+                />
+                <label htmlFor="isEmergency" className="text-sm font-medium text-slate-700">Emergency Drug</label>
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-4">
+              <button
+                type="button"
+                onClick={() => setEditingDrug(null)}
+                className="rounded-xl px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="rounded-xl bg-sky-600 px-6 py-2 text-sm font-bold text-white hover:bg-sky-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Save Changes
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* PHARMACY EDIT MODAL */}
+      {editingPharmacy && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm overflow-y-auto">
+          <form onSubmit={handleSavePharmacy} className="w-full max-w-2xl rounded-[28px] bg-white p-6 shadow-2xl my-8">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+              <h3 className="font-bold text-slate-900 text-lg">Edit Pharmacy Details</h3>
+              <button
+                type="button"
+                onClick={() => setEditingPharmacy(null)}
+                className="rounded-full bg-slate-100 p-1.5 text-slate-500 hover:text-slate-800"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-bold text-slate-700 mb-1">Pharmacy Name</label>
+                <input
+                  type="text"
+                  required
+                  value={editingPharmacy.name || ''}
+                  onChange={e => setEditingPharmacy({ ...editingPharmacy, name: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-sm"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-bold text-slate-700 mb-1">Address</label>
+                <input
+                  type="text"
+                  value={editingPharmacy.address || ''}
+                  onChange={e => setEditingPharmacy({ ...editingPharmacy, address: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Contact Number</label>
+                <input
+                  type="text"
+                  value={editingPharmacy.phone || ''}
+                  onChange={e => setEditingPharmacy({ ...editingPharmacy, phone: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-sm"
+                />
+              </div>
+              <div>
+                {/* placeholder for grid alignment */}
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Latitude</label>
+                <input
+                  type="number"
+                  step="any"
+                  value={editingPharmacy.latitude || ''}
+                  onChange={e => setEditingPharmacy({ ...editingPharmacy, latitude: parseFloat(e.target.value) })}
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Longitude</label>
+                <input
+                  type="number"
+                  step="any"
+                  value={editingPharmacy.longitude || ''}
+                  onChange={e => setEditingPharmacy({ ...editingPharmacy, longitude: parseFloat(e.target.value) })}
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Opening Time</label>
+                <input
+                  type="time"
+                  value={editingPharmacy.opensAt || ''}
+                  onChange={e => setEditingPharmacy({ ...editingPharmacy, opensAt: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Closing Time</label>
+                <input
+                  type="time"
+                  value={editingPharmacy.closesAt || ''}
+                  onChange={e => setEditingPharmacy({ ...editingPharmacy, closesAt: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-sm"
+                />
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-4">
+              <button
+                type="button"
+                onClick={() => setEditingPharmacy(null)}
+                className="rounded-xl px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="rounded-xl bg-sky-600 px-6 py-2 text-sm font-bold text-white hover:bg-sky-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Save Changes
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </main>

@@ -2,7 +2,7 @@ import { AlertCircle, AlertTriangle, ArrowLeft, Boxes, Loader2, PackageSearch, S
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { getInventory } from '../lib/data';
+import { getInventory, updateInventoryItem } from '../lib/data';
 
 interface InventoryItem {
   id: string;
@@ -29,22 +29,48 @@ export function InventoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchInventory = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const data = await getInventory();
-        setInventory(data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load inventory');
-      } finally {
-        setLoading(false);
-      }
-    };
+  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
+  const fetchInventory = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await getInventory();
+      setInventory(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load inventory');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchInventory();
   }, []);
+
+  const handleSaveItem = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingItem) return;
+    try {
+      setIsSaving(true);
+      setError(null);
+      await updateInventoryItem(editingItem.id, {
+        quantity: editingItem.quantity,
+        price: editingItem.price,
+        isAvailable: editingItem.isAvailable,
+        isActive: editingItem.isActive,
+        batchNumber: editingItem.batchNumber,
+        expiryDate: editingItem.expiryDate ? new Date(editingItem.expiryDate).toISOString() : null
+      });
+      await fetchInventory();
+      setEditingItem(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save inventory item');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const lowStockItems = inventory.filter(item => item.quantity < 20).length;
   const totalActive = inventory.filter(item => item.isActive).length;
@@ -193,6 +219,13 @@ export function InventoryPage() {
                         <div className="mt-1 text-sm font-black text-slate-900">{item.isAvailable ? '✓ Available' : '✗ Unavailable'}</div>
                       </div>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => setEditingItem(item)}
+                      className="mt-4 w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                    >
+                      Edit Inventory
+                    </button>
                   </motion.div>
                 );
               })}
@@ -251,6 +284,103 @@ export function InventoryPage() {
             </div>
           </div>
         </section>
+      )}
+
+      {/* INVENTORY EDIT MODAL */}
+      {editingItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm overflow-y-auto">
+          <form onSubmit={handleSaveItem} className="w-full max-w-2xl rounded-[28px] bg-white p-6 shadow-2xl my-8">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+              <h3 className="font-bold text-slate-900 text-lg">Edit Inventory Item</h3>
+              <button
+                type="button"
+                onClick={() => setEditingItem(null)}
+                className="rounded-full bg-slate-100 p-1.5 text-slate-500 hover:text-slate-800"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Quantity</label>
+                <input
+                  type="number"
+                  required
+                  min="0"
+                  value={editingItem.quantity}
+                  onChange={e => setEditingItem({ ...editingItem, quantity: parseInt(e.target.value, 10) || 0 })}
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Price (GH₵)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={editingItem.price || ''}
+                  onChange={e => setEditingItem({ ...editingItem, price: parseFloat(e.target.value) })}
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Batch Number</label>
+                <input
+                  type="text"
+                  value={editingItem.batchNumber || ''}
+                  onChange={e => setEditingItem({ ...editingItem, batchNumber: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Expiry Date</label>
+                <input
+                  type="date"
+                  value={editingItem.expiryDate ? editingItem.expiryDate.split('T')[0] : ''}
+                  onChange={e => setEditingItem({ ...editingItem, expiryDate: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 p-2.5 text-sm"
+                />
+              </div>
+              <div className="flex items-center gap-2 mt-4">
+                <input
+                  type="checkbox"
+                  id="isAvailable"
+                  checked={editingItem.isAvailable || false}
+                  onChange={e => setEditingItem({ ...editingItem, isAvailable: e.target.checked })}
+                  className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-600"
+                />
+                <label htmlFor="isAvailable" className="text-sm font-medium text-slate-700">Available</label>
+              </div>
+              <div className="flex items-center gap-2 mt-4">
+                <input
+                  type="checkbox"
+                  id="isActive"
+                  checked={editingItem.isActive || false}
+                  onChange={e => setEditingItem({ ...editingItem, isActive: e.target.checked })}
+                  className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-600"
+                />
+                <label htmlFor="isActive" className="text-sm font-medium text-slate-700">Active</label>
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-4">
+              <button
+                type="button"
+                onClick={() => setEditingItem(null)}
+                className="rounded-xl px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="rounded-xl bg-sky-600 px-6 py-2 text-sm font-bold text-white hover:bg-sky-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Save Changes
+              </button>
+            </div>
+          </form>
+        </div>
       )}
     </main>
   );

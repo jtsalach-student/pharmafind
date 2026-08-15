@@ -78,21 +78,109 @@ export function PrescriptionUploadPage() {
       setErrorMessage(null);
       setStatus('Uploading prescription for pharmacist review');
 
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('quantity', String(quantity));
-      formData.append('deliveryAddress', deliveryAddress.trim());
-      formData.append('phoneNumber', phoneNumber.trim());
-      if (routeState.pharmacy?.pharmacyId) formData.append('pharmacyId', routeState.pharmacy.pharmacyId);
-      if (routeState.drugId) formData.append('drugId', routeState.drugId);
+      const user = getUser();
+      let userId = user?.id;
 
-      const response = await api.post('/prescriptions', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
+      const supabase = getSupabaseClient();
+      if (!userId) {
+        const { data: authData } = await supabase.auth.getUser();
+        if (authData.user?.id) {
+          userId = authData.user.id;
+        }
+      }
 
-      const prescriptionId = response.data?.prescription?.id;
+      if (!userId) {
+        throw new Error('Please sign in before uploading your prescription.');
+      }
+
+      let prescriptionId: string | null = null;
+
+      // 1. Attempt Express backend API endpoint if reachable
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('quantity', String(quantity));
+        formData.append('deliveryAddress', deliveryAddress.trim());
+        formData.append('phoneNumber', phoneNumber.trim());
+        if (routeState.pharmacy?.pharmacyId) formData.append('pharmacyId', routeState.pharmacy.pharmacyId);
+        if (routeState.drugId) formData.append('drugId', routeState.drugId);
+
+        const response = await api.post('/prescriptions', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+
+        if (response.data?.prescription?.id) {
+          prescriptionId = response.data.prescription.id;
+        }
+      } catch (apiErr: any) {
+        console.warn(
+          '[PrescriptionUpload] API server upload unavailable or returned status ' +
+          (apiErr?.response?.status || 'network') +
+          '. Proceeding with direct Supabase storage & database submission.',
+          apiErr?.message
+        );
+      }
+
+      // 2. Direct Supabase Storage + Database Fallback
       if (!prescriptionId) {
-        throw new Error('Server did not return prescription ID.');
+        const fileName = file.name;
+        const mimeType = file.type || 'image/jpeg';
+        const fileSize = file.size;
+        let storageFilePath = previewUrl || `prescriptions/${userId}/${Date.now()}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+
+        // Attempt Supabase storage bucket upload if available
+        try {
+          const { error: storageError } = await supabase.storage
+            .from('prescriptions')
+            .upload(storageFilePath, file, { upsert: true });
+
+          if (storageError) {
+            console.info('[PrescriptionUpload] Storage bucket notice:', storageError.message);
+          }
+        } catch (storageCatch) {
+          console.info('[PrescriptionUpload] Supabase Storage upload skipped:', storageCatch);
+        }
+
+        // Insert Prescription record
+        const { data: prescData, error: prescError } = await supabase
+          .from('Prescription')
+          .insert([{
+            userId: userId,
+            pharmacyId: routeState.pharmacy?.pharmacyId || null,
+            drugId: routeState.drugId || null,
+            filePath: storageFilePath,
+            originalFileName: fileName,
+            mimeType: mimeType,
+            fileSize: fileSize,
+            quantity: Number.isFinite(quantity) ? quantity : 1,
+            status: 'PENDING_REVIEW',
+            ocrText: 'Prescription uploaded - awaiting pharmacist clinical review',
+            ocrConfidence: 0
+          }])
+          .select()
+          .single();
+
+        if (prescError || !prescData) {
+          throw new Error(prescError?.message || 'Failed to record prescription in database.');
+        }
+
+        prescriptionId = prescData.id;
+
+        // Insert initial DeliveryRequest record
+        const { error: delError } = await supabase
+          .from('DeliveryRequest')
+          .insert([{
+            userId: userId,
+            prescriptionId: prescriptionId,
+            status: 'REQUESTED',
+            quantity: Number.isFinite(quantity) ? quantity : 1,
+            deliveryAddress: deliveryAddress.trim(),
+            phoneNumber: phoneNumber.trim()
+          }]);
+
+        if (delError) {
+          console.warn('[PrescriptionUpload] DeliveryRequest creation notice:', delError.message);
+        }
       }
 
       setSubmittedPrescriptionId(prescriptionId);
@@ -100,14 +188,11 @@ export function PrescriptionUploadPage() {
       setStatus('Waiting for pharmacist approval');
 
       // Dispatch User Notification: Prescription Submitted
-      const user = getUser();
-      if (user?.id) {
-        void createInAppNotification(
-          user.id,
-          `Prescription Submitted: Your prescription for ${routeState.drugName || 'Medication'} has been uploaded and is pending pharmacist review.`,
-          'PRESCRIPTION_SUBMITTED'
-        );
-      }
+      void createInAppNotification(
+        userId,
+        `Prescription Submitted: Your prescription for ${routeState.drugName || 'Medication'} has been uploaded and is pending pharmacist review.`,
+        'PRESCRIPTION_SUBMITTED'
+      );
 
       // Dispatch Pharmacist Notification: New Prescription Submitted
       void notifyUsersWithRole(

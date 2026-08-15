@@ -95,6 +95,10 @@ export type PrescriptionRecord = {
   status: string;
   filePath?: string;
   originalFileName?: string;
+  mimeType?: string;
+  fileSize?: number;
+  reviewReason?: string;
+  ocrText?: string;
   createdAt: string;
   drugId?: string;
   quantity?: number;
@@ -431,7 +435,7 @@ export async function getPrescriptions(): Promise<PrescriptionRecord[]> {
 
   const { data: prescriptions, error } = await supabase
     .from('Prescription')
-    .select('id, userId, status, filePath, originalFileName, createdAt, drugId, quantity, deliveryRequests:DeliveryRequest(id, status)')
+    .select('id, userId, status, filePath, originalFileName, mimeType, fileSize, reviewReason, ocrText, createdAt, drugId, quantity, deliveryRequests:DeliveryRequest(id, status)')
     .order('createdAt', { ascending: false });
   
   if (error) throw error;
@@ -790,3 +794,20 @@ export async function getAdminOperationsData(): Promise<AdminOperationsData> {
   };
 }
 
+export async function updateDrug(id: string, data: Partial<DrugRecord>) {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from('Drug').update(data).eq('id', id);
+  if (error) throw error;
+}
+
+export async function updatePharmacy(id: string, data: Partial<PharmacyRecord>) {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from('Pharmacy').update(data).eq('id', id);
+  if (error) throw error;
+}
+
+export async function updateInventoryItem(id: string, data: any) {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from('Inventory').update(data).eq('id', id);
+  if (error) throw error;
+}

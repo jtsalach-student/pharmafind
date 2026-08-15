@@ -4,6 +4,9 @@ import {
   ArrowLeft,
   CheckCircle2,
   Clock,
+  Download,
+  ExternalLink,
+  FileText,
   Loader2,
   Package,
   PackageCheck,
@@ -56,6 +59,137 @@ export type PharmacyOrderItem = {
   createdAt: string;
   updatedAt?: string;
 };
+
+
+// Resolve a prescription filePath to a viewable URL.
+// If it's a Supabase storage path (starts with 'prescriptions/'), generate a signed URL.
+// If it's a mock/placeholder path, return null.
+function usePrescriptionFileUrl(filePath?: string): { url: string | null; loading: boolean } {
+  const [url, setUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!filePath || filePath.startsWith('mock') || filePath.startsWith('cart-') ||
+        filePath.startsWith('non-rx') || filePath.startsWith('paystack-')) {
+      setUrl(null);
+      return;
+    }
+
+    // Supabase storage path
+    if (filePath.startsWith('prescriptions/')) {
+      setLoading(true);
+      const client = getSupabaseClient();
+      client.storage
+        .from('prescriptions')
+        .createSignedUrl(filePath, 3600)
+        .then(({ data }) => {
+          setUrl(data?.signedUrl ?? null);
+        })
+        .catch(() => setUrl(null))
+        .finally(() => setLoading(false));
+      return;
+    }
+
+    // Local absolute server path — not directly accessible from browser
+    setUrl(null);
+  }, [filePath]);
+
+  return { url, loading };
+}
+
+// Component that renders a single prescription file preview
+function PrescriptionFileViewer({ item }: { item: PrescriptionRecord }) {
+  const { url, loading } = usePrescriptionFileUrl(item.filePath);
+  const isImage = item.mimeType?.startsWith('image/');
+  const isPdf = item.mimeType === 'application/pdf';
+  const isMock = !item.filePath || item.filePath.startsWith('mock') || item.filePath.startsWith('cart-') ||
+    item.filePath.startsWith('non-rx') || item.filePath.startsWith('paystack-');
+
+  if (isMock) {
+    return (
+      <div className="mt-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-3 text-center">
+        <FileText className="mx-auto h-6 w-6 text-slate-300 mb-1" />
+        <p className="text-[10px] text-slate-400">No physical file — auto-generated order</p>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="mt-3 flex items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 p-4">
+        <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+      </div>
+    );
+  }
+
+  if (!url) {
+    return (
+      <div className="mt-3 rounded-2xl border border-dashed border-amber-200 bg-amber-50 p-3">
+        <div className="flex items-center gap-2">
+          <FileText className="h-4 w-4 text-amber-500" />
+          <span className="text-xs font-semibold text-amber-700">
+            {item.originalFileName || 'Prescription document'}
+          </span>
+        </div>
+        <p className="mt-1 text-[10px] text-amber-600">
+          File stored on server — not directly previewable. Check OCR text below.
+        </p>
+        {item.ocrText && item.ocrText !== 'Prescription uploaded - awaiting pharmacist clinical review' && (
+          <div className="mt-2 rounded-xl bg-white border border-amber-100 p-2">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">OCR Extracted Text</p>
+            <p className="text-xs text-slate-700 whitespace-pre-wrap line-clamp-6">{item.ocrText}</p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 space-y-2">
+      {isImage && (
+        <img
+          src={url}
+          alt={item.originalFileName || 'Prescription'}
+          className="w-full rounded-2xl border border-slate-200 object-contain max-h-64 bg-white"
+        />
+      )}
+      {isPdf && (
+        <div className="rounded-2xl border border-sky-100 bg-sky-50 p-3">
+          <div className="flex items-center gap-2 mb-2">
+            <FileText className="h-5 w-5 text-sky-600" />
+            <span className="text-xs font-bold text-sky-800">{item.originalFileName || 'Prescription PDF'}</span>
+          </div>
+          <iframe src={url} className="w-full h-64 rounded-xl border border-sky-200" title="Prescription PDF" />
+        </div>
+      )}
+      <div className="flex gap-2">
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-bold text-sky-700 hover:bg-sky-100 transition"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          Open Full View
+        </a>
+        <a
+          href={url}
+          download={item.originalFileName || 'prescription'}
+          className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 transition"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Download
+        </a>
+      </div>
+      {item.ocrText && item.ocrText !== 'Prescription uploaded - awaiting pharmacist clinical review' && (
+        <div className="rounded-xl bg-slate-50 border border-slate-200 p-2">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">OCR Extracted Text</p>
+          <p className="text-xs text-slate-700 whitespace-pre-wrap line-clamp-6">{item.ocrText}</p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function PharmacistReviewPage() {
   const navigate = useNavigate();
@@ -774,34 +908,40 @@ export function PharmacistReviewPage() {
                         reviewState.prescriptionId === item.id ? 'border-sky-500 bg-sky-50/50 ring-2 ring-sky-200' : 'border-slate-200 bg-slate-50'
                       }`}
                     >
-                      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="flex-1">
-                          <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500">
-                            {item.drug?.genericName || item.originalFileName || 'Prescription'}
-                          </div>
-                          <div className="mt-2 text-lg font-black text-slate-900">
-                            {item.drug?.brandName || item.originalFileName || 'Prescription'}
-                          </div>
-                          <div className="mt-1 text-sm text-slate-600">Awaiting clinical approval</div>
-
-                          {item.drug && (
-                            <div className="mt-3 space-y-1 text-xs text-slate-600 border-t border-slate-200 pt-2">
-                              {item.drug.drugType && <div><span className="font-semibold">Type:</span> {item.drug.drugType}</div>}
-                              {item.drug.strength && <div><span className="font-semibold">Strength:</span> {item.drug.strength}</div>}
-                              {item.drug.indication && <div><span className="font-semibold">Indication:</span> {item.drug.indication}</div>}
-                              {item.quantity && <div><span className="font-semibold">Quantity:</span> {item.quantity} units</div>}
+                      <div className="flex flex-col gap-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1">
+                            <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500">
+                              {item.drug?.genericName || item.originalFileName || 'Prescription'}
                             </div>
-                          )}
-                        </div>
-
-                        <div className="flex flex-col gap-2 sm:flex-row">
+                            <div className="mt-1 text-base font-black text-slate-900">
+                              {item.drug?.brandName || item.drug?.genericName || item.originalFileName || 'Prescription Drug'}
+                            </div>
+                            <div className="mt-0.5 text-xs text-slate-500">Awaiting clinical approval</div>
+                          </div>
                           <button
                             type="button"
                             onClick={() => handleReviewClick(item.id)}
-                            className="primary-button bg-sky-600 hover:bg-sky-700 text-xs px-4 py-2"
+                            className="primary-button bg-sky-600 hover:bg-sky-700 text-xs px-3 py-1.5 whitespace-nowrap"
                           >
                             Review & Decide
                           </button>
+                        </div>
+
+                        {/* Drug details */}
+                        {item.drug && (
+                          <div className="space-y-1 text-xs text-slate-600 border-t border-slate-200 pt-3">
+                            {item.drug.drugType && <div><span className="font-semibold">Type:</span> {item.drug.drugType}</div>}
+                            {item.drug.strength && <div><span className="font-semibold">Strength:</span> {item.drug.strength}</div>}
+                            {item.drug.indication && <div><span className="font-semibold">Indication:</span> {item.drug.indication}</div>}
+                            {item.quantity && <div><span className="font-semibold">Quantity:</span> {item.quantity} units</div>}
+                          </div>
+                        )}
+
+                        {/* Uploaded prescription file */}
+                        <div className="border-t border-slate-200 pt-3">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Uploaded Prescription</div>
+                          <PrescriptionFileViewer item={item} />
                         </div>
                       </div>
                     </motion.div>
@@ -810,11 +950,29 @@ export function PharmacistReviewPage() {
               </div>
 
               {/* Review Action Form Panel */}
-              <div className="rounded-[30px] border border-slate-200 bg-white/80 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.05)] backdrop-blur">
-                <h2 className="text-xl font-black text-slate-900">Decision Panel</h2>
-                <p className="mt-1 text-xs text-slate-500">
-                  Select a prescription on the left to approve, reject, or request clarification.
-                </p>
+              <div className="rounded-[30px] border border-slate-200 bg-white/80 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.05)] backdrop-blur space-y-6">
+                <div>
+                  <h2 className="text-xl font-black text-slate-900">Decision Panel</h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Select a prescription on the left to approve, reject, or request clarification.
+                  </p>
+                </div>
+
+                {/* Show uploaded file in decision panel when prescription is selected */}
+                {reviewState.prescriptionId && (() => {
+                  const selected = prescriptions.find(p => p.id === reviewState.prescriptionId);
+                  if (!selected) return null;
+                  return (
+                    <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-4">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Prescription Document</div>
+                      <div className="text-sm font-bold text-slate-900 mb-2">
+                        {selected.drug?.genericName || selected.originalFileName || 'Prescription'}
+                        {selected.quantity ? ` — ${selected.quantity} units` : ''}
+                      </div>
+                      <PrescriptionFileViewer item={selected} />
+                    </div>
+                  );
+                })()}
 
                 {reviewState.prescriptionId ? (
                   <div className="mt-6 space-y-4">

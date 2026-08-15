@@ -122,9 +122,9 @@ export function Nav() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => navigate('/dashboard')}
+                      onClick={() => navigate('/search')}
                       className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
-                        location.pathname === '/dashboard'
+                        location.pathname === '/search'
                           ? 'bg-slate-900 text-white shadow-xs'
                           : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                       }`}
