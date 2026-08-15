@@ -5,11 +5,9 @@ import { useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
-import { getRoleDashboard, normalizeRoleInput, type UserRole } from '../lib/auth';
+import { getRoleDashboard } from '../lib/auth';
 import { registerUser } from '../lib/authService';
 import { createInAppNotification, notifyUsersWithRole } from '../lib/notifications';
-
-const validRoles = ['USER', 'PHARMACIST', 'PHARMACY_ADMIN', 'DRIVER', 'SYSTEM_ADMIN'] as const;
 
 const registerSchema = z
   .object({
@@ -17,10 +15,7 @@ const registerSchema = z
     fullName: z.string().trim().min(2, 'Full name is required').refine((value) => value.split(/\s+/).length >= 2, 'Enter at least first and last name'),
     email: z.string().trim().email('Enter a valid email'),
     phone: z.string().trim().regex(/^\+233[2,3,5,6,7,8,9][0-9]{8}$/, 'Enter a valid Ghana phone number'),
-    role: z.custom<UserRole>((value) => {
-      const normalized = normalizeRoleInput(typeof value === 'string' ? value : '');
-      return normalized !== null && validRoles.includes(normalized);
-    }, 'Select a valid role'),
+    role: z.enum(['USER', 'PHARMACIST', 'DRIVER']),
     password: z
       .string()
       .min(6, 'Password must be at least 6 characters'),
@@ -256,13 +251,11 @@ export function RegisterPage() {
             </div>
 
             <div>
-              <label htmlFor="role" className="mb-2 block text-sm font-semibold text-slate-700">Role</label>
+              <label htmlFor="role" className="mb-2 block text-sm font-semibold text-slate-700">Account Type</label>
               <select id="role" className="input-shell" {...register('role')} aria-invalid={!!errors.role} defaultValue="USER">
-                <option value="USER">Patient</option>
-                <option value="PHARMACIST">Pharmacist</option>
-                <option value="PHARMACY_ADMIN">Pharmacy Admin</option>
-                <option value="DRIVER">Driver</option>
-                <option value="SYSTEM_ADMIN">System Admin</option>
+                <option value="USER">User (Medicine Access & Orders)</option>
+                <option value="PHARMACIST">Pharmacist (Pharmacy Operations & Review)</option>
+                <option value="DRIVER">Driver (Medication Delivery & Logistics)</option>
               </select>
               {errors.role && <p className="mt-2 text-sm text-red-600">{errors.role.message}</p>}
             </div>

@@ -53,7 +53,7 @@ export function LandingPage() {
               Medicine delivery, <span className="text-sky-600">care, and emergency help</span> in one place.
             </h1>
             <p className="max-w-xl text-lg text-slate-600">
-              PharmaFind helps patients, pharmacies, and delivery teams move faster with precise medicine discovery, prescription workflows, and healthcare logistics built for everyday life.
+              PharmaFind helps users, pharmacies, and delivery teams move faster with precise medicine discovery, prescription workflows, and healthcare logistics built for everyday life.
             </p>
           </div>
 

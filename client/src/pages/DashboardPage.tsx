@@ -55,7 +55,7 @@ type DeliverySummary = {
 
 const roleMeta: Record<RoleKey, RoleMeta> = {
   USER: {
-    label: 'Patient Dashboard',
+    label: 'User Dashboard',
     accent: 'from-sky-500 to-emerald-500',
     icon: HeartPulse
   },
@@ -105,6 +105,21 @@ export function DashboardPage() {
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [emergencyDrugs, setEmergencyDrugs] = useState<DrugRecord[]>([]);
   const [deliveries, setDeliveries] = useState<DeliverySummary[]>([]);
+
+  useEffect(() => {
+    if (role === 'SYSTEM_ADMIN' || role === 'PHARMACY_ADMIN') {
+      navigate('/admin', { replace: true });
+      return;
+    }
+    if (role === 'PHARMACIST') {
+      navigate('/pharmacist', { replace: true });
+      return;
+    }
+    if (role === 'DRIVER') {
+      navigate('/driver', { replace: true });
+      return;
+    }
+  }, [role, navigate]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -178,7 +193,7 @@ export function DashboardPage() {
           })));
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load patient dashboard data');
+        setError(err instanceof Error ? err.message : 'Failed to load user dashboard data');
       } finally {
         setLoading(false);
       }

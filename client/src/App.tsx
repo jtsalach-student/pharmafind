@@ -27,9 +27,12 @@ import { SearchPage } from './pages/SearchPage';
 
 function AppRoutes() {
   const location = useLocation();
+  const hasSession = Boolean(getToken());
 
   return (
-    <AnimatePresence mode="wait">
+    <>
+      {hasSession && <Nav />}
+      <AnimatePresence mode="wait">
       <motion.div
         key={location.pathname}
         initial={{ opacity: 0, y: 12 }}
@@ -71,18 +74,14 @@ function AppRoutes() {
         </Routes>
       </motion.div>
     </AnimatePresence>
+    </>
   );
 }
 
 function App() {
-  const hasSession = Boolean(getToken());
-
   return (
     <CartProvider>
-      <>
-        {hasSession && <Nav />}
-        <AppRoutes />
-      </>
+      <AppRoutes />
     </CartProvider>
   );
 }

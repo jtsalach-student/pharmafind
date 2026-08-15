@@ -98,7 +98,7 @@ export function LoginPage() {
                 Smarter access to medicines and local healthcare.
               </h1>
               <p className="max-w-md text-base text-sky-100">
-                Connect patients with verified pharmacies, fast prescription support, and emergency delivery assistance in real time.
+                Connect users with verified pharmacies, fast prescription support, and emergency delivery assistance in real time.
               </p>
             </div>
 

@@ -178,7 +178,7 @@ export async function getDashboardData(role: AppRole) {
 
       return {
         stats: [
-          { label: 'Patients', value: String(patientCount ?? 0), detail: 'Registered' },
+          { label: 'Users', value: String(patientCount ?? 0), detail: 'Registered' },
           { label: 'Prescriptions', value: String(prescriptionCount ?? 0), detail: 'Handled' },
           { label: 'Deliveries', value: String(deliveryCount ?? 0), detail: 'Scheduled' }
         ]
@@ -606,3 +606,187 @@ export async function getAuditLogs() {
   if (auditError) throw auditError;
   return auditData ?? [];
 }
+
+export type AdminOperationsData = {
+  users: {
+    total: number;
+    patients: number;
+    pharmacists: number;
+    drivers: number;
+    admins: number;
+    list: Array<{
+      id: string;
+      username: string;
+      email: string;
+      fullName?: string;
+      phone?: string;
+      role: string;
+      createdAt: string;
+    }>;
+  };
+  pharmacies: {
+    total: number;
+    openNow: number;
+    closedNow: number;
+    list: PharmacyRecord[];
+  };
+  drugs: {
+    total: number;
+    emergencyCount: number;
+    rxRequiredCount: number;
+    list: DrugRecord[];
+  };
+  inventory: {
+    totalRecords: number;
+    totalStockUnits: number;
+    lowStockCount: number;
+    outOfStockCount: number;
+    list: any[];
+  };
+  deliveries: {
+    total: number;
+    requested: number;
+    inTransit: number;
+    delivered: number;
+    completed: number;
+    list: any[];
+  };
+  prescriptions: {
+    total: number;
+    pendingReview: number;
+    approved: number;
+    rejected: number;
+    list: any[];
+  };
+  auditLogs: any[];
+};
+
+export async function getAdminOperationsData(): Promise<AdminOperationsData> {
+  const supabase = getSupabaseClient();
+
+  const [
+    usersRes,
+    pharmaciesRes,
+    drugsRes,
+    inventoryRes,
+    deliveriesRes,
+    prescriptionsRes,
+    auditLogsRes
+  ] = await Promise.allSettled([
+    supabase.from('User').select('id, username, email, fullName, phone, role, createdAt').order('createdAt', { ascending: false }).limit(100),
+    supabase.from('Pharmacy').select('*').order('name', { ascending: true }),
+    supabase.from('Drug').select('*').order('genericName', { ascending: true }),
+    supabase.from('Inventory').select('id, pharmacyId, drugId, quantity, price, expiryDate, batchNumber, isAvailable, isActive, createdAt').order('createdAt', { ascending: false }),
+    supabase.from('DeliveryRequest').select('id, userId, prescriptionId, pharmacyId, driverId, status, deliveryAddress, phoneNumber, totalCost, deliveryFee, createdAt').order('createdAt', { ascending: false }).limit(50),
+    supabase.from('Prescription').select('id, userId, pharmacyId, drugId, status, originalFileName, quantity, createdAt, reviewReason').order('createdAt', { ascending: false }).limit(50),
+    supabase.from('AuditLog').select('*').order('createdAt', { ascending: false }).limit(50)
+  ]);
+
+  const rawUsers = usersRes.status === 'fulfilled' && usersRes.value.data ? usersRes.value.data : [];
+  const rawPharmacies = pharmaciesRes.status === 'fulfilled' && pharmaciesRes.value.data ? pharmaciesRes.value.data : [];
+  const rawDrugs = drugsRes.status === 'fulfilled' && drugsRes.value.data ? drugsRes.value.data : [];
+  const rawInventory = inventoryRes.status === 'fulfilled' && inventoryRes.value.data ? inventoryRes.value.data : [];
+  const rawDeliveries = deliveriesRes.status === 'fulfilled' && deliveriesRes.value.data ? deliveriesRes.value.data : [];
+  const rawPrescriptions = prescriptionsRes.status === 'fulfilled' && prescriptionsRes.value.data ? prescriptionsRes.value.data : [];
+  const rawAuditLogs = auditLogsRes.status === 'fulfilled' && auditLogsRes.value.data ? auditLogsRes.value.data : [];
+
+  // Users metrics
+  const patientsCount = rawUsers.filter(u => u.role === 'USER').length;
+  const pharmacistsCount = rawUsers.filter(u => u.role === 'PHARMACIST').length;
+  const driversCount = rawUsers.filter(u => u.role === 'DRIVER').length;
+  const adminsCount = rawUsers.filter(u => u.role === 'SYSTEM_ADMIN' || u.role === 'PHARMACY_ADMIN').length;
+
+  // Pharmacy open/closed metrics
+  let openNowCount = 0;
+  let closedNowCount = 0;
+  const processedPharmacies = (rawPharmacies as PharmacyRecord[]).map(p => {
+    const open = isPharmacyOpen(p.opensAt, p.closesAt);
+    if (open) openNowCount++;
+    else closedNowCount++;
+    return { ...p, isOpen: open };
+  });
+
+  // Drugs metrics
+  const emergencyDrugsCount = (rawDrugs as DrugRecord[]).filter(d => Boolean(d.isEmergency)).length;
+  const rxDrugsCount = (rawDrugs as DrugRecord[]).filter(d => Boolean(d.requiresRx)).length;
+
+  // Inventory metrics & mapping
+  const drugMap = new Map((rawDrugs as DrugRecord[]).map(d => [d.id, d]));
+  const pharmacyMap = new Map((rawPharmacies as PharmacyRecord[]).map(p => [p.id, p]));
+
+  let totalStockUnits = 0;
+  let lowStockCount = 0;
+  let outOfStockCount = 0;
+
+  const processedInventory = rawInventory.map(item => {
+    const qty = Number(item.quantity ?? 0);
+    totalStockUnits += qty;
+    if (qty <= 0) outOfStockCount++;
+    else if (qty < 10) lowStockCount++;
+
+    return {
+      ...item,
+      quantity: qty,
+      drug: drugMap.get(item.drugId),
+      pharmacy: pharmacyMap.get(item.pharmacyId)
+    };
+  });
+
+  // Delivery metrics
+  const requestedCount = rawDeliveries.filter(d => d.status === 'REQUESTED').length;
+  const inTransitCount = rawDeliveries.filter(d => d.status === 'IN_TRANSIT').length;
+  const deliveredCount = rawDeliveries.filter(d => d.status === 'DELIVERED').length;
+  const completedCount = rawDeliveries.filter(d => d.status === 'COMPLETED').length;
+
+  // Prescriptions metrics
+  const pendingReviewCount = rawPrescriptions.filter(p => p.status === 'PENDING_REVIEW').length;
+  const approvedPrescCount = rawPrescriptions.filter(p => p.status === 'APPROVED').length;
+  const rejectedPrescCount = rawPrescriptions.filter(p => p.status === 'REJECTED').length;
+
+  return {
+    users: {
+      total: rawUsers.length,
+      patients: patientsCount,
+      pharmacists: pharmacistsCount,
+      drivers: driversCount,
+      admins: adminsCount,
+      list: rawUsers
+    },
+    pharmacies: {
+      total: rawPharmacies.length,
+      openNow: openNowCount,
+      closedNow: closedNowCount,
+      list: processedPharmacies
+    },
+    drugs: {
+      total: rawDrugs.length,
+      emergencyCount: emergencyDrugsCount,
+      rxRequiredCount: rxDrugsCount,
+      list: rawDrugs as DrugRecord[]
+    },
+    inventory: {
+      totalRecords: rawInventory.length,
+      totalStockUnits,
+      lowStockCount,
+      outOfStockCount,
+      list: processedInventory
+    },
+    deliveries: {
+      total: rawDeliveries.length,
+      requested: requestedCount,
+      inTransit: inTransitCount,
+      delivered: deliveredCount,
+      completed: completedCount,
+      list: rawDeliveries
+    },
+    prescriptions: {
+      total: rawPrescriptions.length,
+      pendingReview: pendingReviewCount,
+      approved: approvedPrescCount,
+      rejected: rejectedPrescCount,
+      list: rawPrescriptions
+    },
+    auditLogs: rawAuditLogs
+  };
+}
+

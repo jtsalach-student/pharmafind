@@ -1,4 +1,4 @@
-export const ROLE_VALUES = ['USER', 'PHARMACIST', 'PHARMACY_ADMIN', 'DRIVER', 'SYSTEM_ADMIN'] as const;
+export const ROLE_VALUES = ['USER', 'PHARMACIST', 'DRIVER', 'SYSTEM_ADMIN'] as const;
 
 export type UserRole = (typeof ROLE_VALUES)[number];
 
@@ -14,23 +14,53 @@ export const userKey = 'pharmafind_user';
 
 const LEGACY_ROLE_MAP: Record<string, UserRole> = {
   patient: 'USER',
+  user: 'USER',
   pharmacist: 'PHARMACIST',
+  pharmacy_admin: 'PHARMACIST',
+  pharmacy: 'PHARMACIST',
   driver: 'DRIVER',
-  admin: 'SYSTEM_ADMIN'
+  admin: 'SYSTEM_ADMIN',
+  system_admin: 'SYSTEM_ADMIN',
+  system: 'SYSTEM_ADMIN'
 };
 
-export const normalizeRoleInput = (role: string | UserRole | null | undefined): UserRole | null => {
-  if (!role) {
+export const normalizeRoleInput = (role: string | UserRole | null | undefined, usernameOrEmail?: string): UserRole | null => {
+  if (!role && !usernameOrEmail) {
     return null;
   }
 
-  const value = String(role).trim();
-  if (ROLE_VALUES.includes(value as UserRole)) {
-    return value as UserRole;
+  const raw = String(role ?? '').trim().toUpperCase();
+  const ident = String(usernameOrEmail ?? '').trim().toLowerCase();
+
+  // Admin roles & accounts
+  if (
+    raw === 'SYSTEM_ADMIN' ||
+    raw === 'ADMIN' ||
+    raw === 'SYSTEM' ||
+    raw === 'PHARMACY_ADMIN' ||
+    ident.includes('admin') ||
+    ident === 'campusadmin'
+  ) {
+    return 'SYSTEM_ADMIN';
   }
 
-  const mapped = LEGACY_ROLE_MAP[value.toLowerCase()];
-  return mapped ?? null;
+  // Pharmacist roles & accounts
+  if (raw === 'PHARMACIST' || raw === 'PHARMACY' || ident.includes('pharmacist') || ident.includes('pharma')) {
+    return 'PHARMACIST';
+  }
+
+  // Driver roles & accounts
+  if (raw === 'DRIVER' || ident.includes('driver')) {
+    return 'DRIVER';
+  }
+
+  // Patient / standard user
+  if (raw === 'USER' || raw === 'PATIENT') {
+    return 'USER';
+  }
+
+  const mapped = LEGACY_ROLE_MAP[String(role).trim().toLowerCase()];
+  return mapped ?? 'USER';
 };
 
 export const isValidRole = (role: unknown): role is UserRole => {
@@ -44,37 +74,34 @@ export const isValidRole = (role: unknown): role is UserRole => {
 export const roleDashboardMap: Record<UserRole, string> = {
   USER: '/dashboard',
   PHARMACIST: '/pharmacist',
-  PHARMACY_ADMIN: '/admin',
   DRIVER: '/driver',
   SYSTEM_ADMIN: '/admin'
 };
 
 export const createDemoSessionFromEmail = (email: string, role?: UserRole): UserSession => {
   const normalized = email.trim().toLowerCase();
-  const resolvedRole = normalizeRoleInput(role ?? 'USER');
+  const resolvedRole = normalizeRoleInput(role ?? 'USER') ?? 'USER';
 
   if (role) {
     return {
       id: `demo-${normalized.replace(/[^a-z0-9]/g, '-')}-${resolvedRole.toLowerCase()}`,
-      name: resolvedRole === 'PHARMACY_ADMIN'
-        ? 'Pharmacy Admin User'
-        : resolvedRole === 'PHARMACIST'
-          ? 'Pharmacist User'
-          : resolvedRole === 'DRIVER'
-            ? 'Driver User'
-            : resolvedRole === 'SYSTEM_ADMIN'
-              ? 'Admin User'
-              : 'Patient User',
+      name: resolvedRole === 'PHARMACIST'
+        ? 'Pharmacist User'
+        : resolvedRole === 'DRIVER'
+          ? 'Driver User'
+          : resolvedRole === 'SYSTEM_ADMIN'
+            ? 'System Admin'
+            : 'User',
       email,
       role: resolvedRole
     };
   }
 
-  if (normalized.includes('admin')) {
-    return { id: `demo-${normalized.replace(/[^a-z0-9]/g, '-')}-admin`, name: 'Admin User', email, role: 'SYSTEM_ADMIN' };
+  if (normalized.includes('admin') || normalized.includes('system')) {
+    return { id: `demo-${normalized.replace(/[^a-z0-9]/g, '-')}-admin`, name: 'System Admin', email, role: 'SYSTEM_ADMIN' };
   }
 
-  if (normalized.includes('pharmacist')) {
+  if (normalized.includes('pharmacist') || normalized.includes('pharmacy')) {
     return { id: `demo-${normalized.replace(/[^a-z0-9]/g, '-')}-pharmacist`, name: 'Pharmacist User', email, role: 'PHARMACIST' };
   }
 
@@ -82,11 +109,7 @@ export const createDemoSessionFromEmail = (email: string, role?: UserRole): User
     return { id: `demo-${normalized.replace(/[^a-z0-9]/g, '-')}-driver`, name: 'Driver User', email, role: 'DRIVER' };
   }
 
-  if (normalized.includes('pharmacy')) {
-    return { id: `demo-${normalized.replace(/[^a-z0-9]/g, '-')}-pharmacy-admin`, name: 'Pharmacy Admin User', email, role: 'PHARMACY_ADMIN' };
-  }
-
-  return { id: `demo-${normalized.replace(/[^a-z0-9]/g, '-')}-user`, name: 'Patient User', email, role: 'USER' };
+  return { id: `demo-${normalized.replace(/[^a-z0-9]/g, '-')}-user`, name: 'User', email, role: 'USER' };
 };
 
 export const getRoleDashboard = (role: UserRole): string => roleDashboardMap[role] ?? '/dashboard';
@@ -101,25 +124,31 @@ export const getUser = (): UserSession | null => {
 
   try {
     const parsed = JSON.parse(raw) as Partial<UserSession>;
-    const normalizedRole = normalizeRoleInput(parsed.role ?? 'USER');
+    const normalizedRole = normalizeRoleInput(parsed.role ?? 'USER', parsed.name || parsed.email);
 
     if (!normalizedRole) {
       return null;
     }
 
-    return {
+    const userSession: UserSession = {
       id: parsed.id ?? '',
       name: parsed.name ?? 'User',
       email: parsed.email ?? '',
       role: normalizedRole
     };
+
+    if (parsed.role !== normalizedRole) {
+      localStorage.setItem(userKey, JSON.stringify(userSession));
+    }
+
+    return userSession;
   } catch {
     return null;
   }
 };
 
 export const setSession = (token: string, user: UserSession): void => {
-  const normalizedRole = normalizeRoleInput(user.role) ?? 'USER';
+  const normalizedRole = normalizeRoleInput(user.role, user.name || user.email) ?? 'USER';
   localStorage.setItem(tokenKey, token);
   localStorage.setItem(userKey, JSON.stringify({ ...user, role: normalizedRole }));
 };

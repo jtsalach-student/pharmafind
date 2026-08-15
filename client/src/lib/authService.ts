@@ -71,7 +71,7 @@ export async function loginUser(params: LoginParams): Promise<AuthResult> {
       };
 
       if (token && user?.id) {
-        const role = normalizeRoleInput(user.role ?? 'USER') ?? 'USER';
+        const role = normalizeRoleInput(user.role ?? 'USER', user.username || user.email || input) ?? 'USER';
         const session: UserSession = {
           id: user.id,
           name: user.fullName || user.username || input,
@@ -122,7 +122,7 @@ export async function loginUser(params: LoginParams): Promise<AuthResult> {
       throw new Error('Invalid username or password.');
     }
 
-    const role = normalizeRoleInput(user.role) ?? 'USER';
+    const role = normalizeRoleInput(user.role, user.username || user.email || input) ?? 'USER';
     const token = createClientToken(user.id, role);
     const session: UserSession = {
       id: user.id,

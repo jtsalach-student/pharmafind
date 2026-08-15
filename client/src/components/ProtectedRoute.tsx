@@ -1,5 +1,5 @@
 import { Navigate } from 'react-router-dom';
-import { getToken, getUser, type UserRole } from '../lib/auth';
+import { getRoleDashboard, getToken, getUser, normalizeRoleInput, type UserRole } from '../lib/auth';
 
 type ProtectedRouteProps = {
   children: React.ReactNode;
@@ -28,8 +28,14 @@ export function RoleProtectedRoute({ children, allowedRoles }: RoleProtectedRout
 
   const user = getUser();
 
-  if (!user || !allowedRoles.includes(user.role)) {
-    return <Navigate to="/dashboard" replace />;
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  const normalizedRole = normalizeRoleInput(user.role) ?? 'USER';
+
+  if (!allowedRoles.includes(normalizedRole)) {
+    return <Navigate to={getRoleDashboard(normalizedRole)} replace />;
   }
 
   return <>{children}</>;

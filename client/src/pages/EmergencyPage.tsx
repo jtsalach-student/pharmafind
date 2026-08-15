@@ -14,6 +14,7 @@ type EmergencyDrug = {
   category: string;
   isEmergency: boolean;
   price?: number | string;
+  Inventory?: { price: number | null, isAvailable: boolean, isActive: boolean }[];
 };
 
 type EmergencyResult = {
@@ -51,7 +52,7 @@ export function EmergencyPage() {
         const client = getSupabaseClient();
         const { data, error } = await client
           .from('Drug')
-          .select('*')
+          .select('*, Inventory(price, isAvailable, isActive)')
           .eq('isEmergency', true)
           .order('genericName', { ascending: true });
 
@@ -321,7 +322,27 @@ export function EmergencyPage() {
                 </div>
 
                 <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-red-100 bg-white px-3 py-2 text-sm font-medium text-slate-600">
-                  <div className="flex items-center gap-2"><ShieldAlert className="h-4 w-4 text-red-600" /> Price: GHS {Number(drug.price ?? 0).toFixed(2)}</div>
+                  <div className="flex items-center gap-2">
+                    <ShieldAlert className="h-4 w-4 text-red-600" /> 
+                    Price:{' '}
+                    {(() => {
+                      const basePrice = Number(drug.price ?? 0);
+                      const invPrices = (drug.Inventory ?? [])
+                        .filter((i) => i.isAvailable && i.isActive)
+                        .map((i) => Number(i.price ?? basePrice))
+                        .filter((p) => p > 0);
+
+                      if (invPrices.length > 0) {
+                        const min = Math.min(...invPrices);
+                        const max = Math.max(...invPrices);
+                        if (min === max) {
+                          return `GHS ${min.toFixed(2)}`;
+                        }
+                        return `GHS ${min.toFixed(2)} - ${max.toFixed(2)}`;
+                      }
+                      return `GHS ${basePrice.toFixed(2)}`;
+                    })()}
+                  </div>
                   <ArrowRight className="h-4 w-4 text-red-600" />
                 </div>
               </motion.button>

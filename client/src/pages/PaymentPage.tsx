@@ -31,17 +31,13 @@ export function PaymentPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isMockModalOpen, setIsMockModalOpen] = useState(false);
+  const [quantity, setQuantity] = useState(routeState.quantity ?? 1);
 
-  const quantity = routeState.quantity ?? 1;
   const unitPrice = routeState.unitPrice ?? 0;
   const distanceKm = routeState.distanceKm ?? 0;
   const deliveryFee = calculateDeliveryFee(distanceKm);
   const subtotal = Number((quantity * unitPrice).toFixed(2));
   const totalCost = Number((subtotal + deliveryFee).toFixed(2));
-
-  if (quantity <= 0) {
-    throw new Error('Quantity must be greater than zero.');
-  }
 
   useEffect(() => {
     const hasRequiredInfo = (routeState.requiresRx && routeState.prescriptionId) ||
@@ -406,8 +402,25 @@ export function PaymentPage() {
             <div className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Cost breakdown</div>
 
             <div className="rounded-[24px] border border-slate-200 bg-white p-4">
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-600">Medicine ({quantity}x)</span>
+              <div className="flex justify-between items-center text-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                  <span className="text-slate-600">Medicine</span>
+                  <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50 h-8">
+                    <button 
+                      type="button" 
+                      className="px-3 h-full text-slate-500 hover:text-slate-900 disabled:opacity-50 border-r border-slate-200 font-bold"
+                      onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                      disabled={quantity <= 1 || isSubmitting}
+                    >-</button>
+                    <span className="w-10 text-center font-semibold text-slate-900">{quantity}</span>
+                    <button 
+                      type="button" 
+                      className="px-3 h-full text-slate-500 hover:text-slate-900 disabled:opacity-50 border-l border-slate-200 font-bold"
+                      onClick={() => setQuantity(quantity + 1)}
+                      disabled={isSubmitting}
+                    >+</button>
+                  </div>
+                </div>
                 <span className="font-semibold text-slate-900">GH₵ {subtotal.toFixed(2)}</span>
               </div>
               {unitPrice > 0 && (

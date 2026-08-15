@@ -138,7 +138,7 @@ export function SearchPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="text-sm font-medium uppercase tracking-[0.2em] text-slate-500">Find medicine</div>
-            <h1 className="mt-2 text-3xl font-black text-slate-900">Patient search</h1>
+            <h1 className="mt-2 text-3xl font-black text-slate-900">User search</h1>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
