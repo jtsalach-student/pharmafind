@@ -1,7 +1,8 @@
 import { ArrowLeft, Clock, MapPin, Navigation, Phone } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { calculateDistance, estimateDeliveryTime, type Coordinates } from '../lib/geolocation';
+import { type Coordinates } from '../lib/geolocation';
+import { fetchRoadRoute } from '../lib/routing';
 import { getSupabaseClient } from '../lib/supabase';
 import { MapView } from '../components/MapView';
 
@@ -53,19 +54,19 @@ export function PharmacyDetailsPage() {
 
         const passedLocation = (locationState.state as { userLocation?: Coordinates } | null)?.userLocation;
         if (passedLocation) {
-          const distanceKm = calculateDistance(passedLocation, {
-            latitude: pharmacyData.latitude,
-            longitude: pharmacyData.longitude
-          });
+          const roadRoute = await fetchRoadRoute(
+            [pharmacyData.latitude, pharmacyData.longitude],
+            [passedLocation.latitude, passedLocation.longitude]
+          );
 
-          console.log('User Location', passedLocation.latitude, passedLocation.longitude);
-          console.log('Pharmacy Location', pharmacyData.latitude, pharmacyData.longitude);
-          console.log('Distance', Number(distanceKm.toFixed(1)));
-          console.log('ETA', estimateDeliveryTime(distanceKm));
+          console.log('[Pharmacy Details] User Location', passedLocation.latitude, passedLocation.longitude);
+          console.log('[Pharmacy Details] Pharmacy Location', pharmacyData.latitude, pharmacyData.longitude);
+          console.log('[Pharmacy Details] Road Distance', roadRoute.distanceKm);
+          console.log('[Pharmacy Details] Road ETA', roadRoute.etaMinutes);
 
           setUserLocation(passedLocation);
-          setDistance(Number(distanceKm.toFixed(1)));
-          setEtaMinutes(estimateDeliveryTime(distanceKm));
+          setDistance(roadRoute.distanceKm);
+          setEtaMinutes(roadRoute.etaMinutes);
           setLoading(false);
           return;
         }
@@ -98,21 +99,20 @@ export function PharmacyDetailsPage() {
           return;
         }
 
-        console.log('User Location', browserLocation.latitude, browserLocation.longitude);
-        console.log('Pharmacy Location', pharmacyData.latitude, pharmacyData.longitude);
+        console.log('[Pharmacy Details] User Location', browserLocation.latitude, browserLocation.longitude);
+        console.log('[Pharmacy Details] Pharmacy Location', pharmacyData.latitude, pharmacyData.longitude);
 
-        const distanceKm = calculateDistance(browserLocation, {
-          latitude: pharmacyData.latitude,
-          longitude: pharmacyData.longitude
-        });
-        const routeEta = estimateDeliveryTime(distanceKm);
+        const roadRoute = await fetchRoadRoute(
+          [pharmacyData.latitude, pharmacyData.longitude],
+          [browserLocation.latitude, browserLocation.longitude]
+        );
 
-        console.log('Distance', Number(distanceKm.toFixed(1)));
-        console.log('ETA', routeEta);
+        console.log('[Pharmacy Details] Road Distance', roadRoute.distanceKm);
+        console.log('[Pharmacy Details] Road ETA', roadRoute.etaMinutes);
 
         setUserLocation(browserLocation);
-        setDistance(Number(distanceKm.toFixed(1)));
-        setEtaMinutes(routeEta);
+        setDistance(roadRoute.distanceKm);
+        setEtaMinutes(roadRoute.etaMinutes);
       } catch (err: any) {
         setError(err?.message || 'Failed to load pharmacy details');
       } finally {
@@ -263,11 +263,27 @@ export function PharmacyDetailsPage() {
           <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
             <div className="flex items-start gap-3">
               <Clock className="h-5 w-5 text-slate-500 mt-0.5 flex-shrink-0" />
-              <div>
+              <div className="flex-1">
                 <div className="text-xs uppercase tracking-[0.1em] text-slate-500 mb-1">Hours</div>
                 <div className="font-semibold text-slate-900">
                   {pharmacy.opensAt} – {pharmacy.closesAt}
                 </div>
+                {(() => {
+                  const now = new Date();
+                  const [openHours, openMins] = pharmacy.opensAt.split(':').map(Number);
+                  const [closeHours, closeMins] = pharmacy.closesAt.split(':').map(Number);
+                  const currentTime = now.getHours() * 60 + now.getMinutes();
+                  const openTime = openHours * 60 + openMins;
+                  const closeTime = closeHours * 60 + closeMins;
+                  const isOpen = closeTime > openTime
+                    ? (currentTime >= openTime && currentTime < closeTime)
+                    : (currentTime >= openTime || currentTime < closeTime);
+                  return (
+                    <div className={`mt-2 inline-block rounded-full px-3 py-1 text-xs font-semibold ${isOpen ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                      {isOpen ? '🟢 OPEN NOW' : '🔴 CLOSED'}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>

@@ -7,6 +7,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { getRoleDashboard, normalizeRoleInput, setSession, type UserRole } from '../lib/auth';
 import { api } from '../lib/api';
+import { createInAppNotification, notifyUsersWithRole } from '../lib/notifications';
 
 const validRoles = ['USER', 'PHARMACIST', 'PHARMACY_ADMIN', 'DRIVER', 'SYSTEM_ADMIN'] as const;
 
@@ -144,6 +145,20 @@ export function RegisterPage() {
         email: user?.email || values.email,
         role: role ?? values.role
       });
+
+      // Dispatch welcome in-app notification to new user
+      void createInAppNotification(
+        user.id,
+        `Welcome to PharmaFind, ${values.fullName || values.username}! Your ${role ?? values.role} account has been created successfully.`,
+        'ACCOUNT_CREATED'
+      );
+
+      // Dispatch alert to system admins
+      void notifyUsersWithRole(
+        'SYSTEM_ADMIN',
+        `New User Registered: ${values.fullName || values.username} (${values.email}) joined as ${role ?? values.role}.`,
+        'ADMIN_USER_REGISTERED'
+      );
 
       setStatusMessage({
         type: 'success',

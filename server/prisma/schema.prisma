@@ -87,6 +87,9 @@ model Drug {
   price          Decimal     @db.Decimal(10,2)
   requiresRx     Boolean     @default(false)
   isEmergency    Boolean     @default(false)
+  drugType       String?
+  strength       String?
+  indication     String?
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
   inventoryItems Inventory[]
@@ -109,16 +112,19 @@ model AdminUser {
 }
 
 model Inventory {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   pharmacyId  String
   drugId      String
-  quantity    Int      @default(0)
-  isAvailable Boolean  @default(true)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  pharmacy    Pharmacy @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
-  drug        Drug     @relation(fields: [drugId], references: [id], onDelete: Cascade)
+  quantity    Int       @default(0)
+  price       Decimal?  @db.Decimal(10,2)
+  expiryDate  DateTime?
+  batchNumber String?
+  isAvailable Boolean   @default(true)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  pharmacy    Pharmacy  @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+  drug        Drug      @relation(fields: [drugId], references: [id], onDelete: Cascade)
 
   @@unique([pharmacyId, drugId])
 }
@@ -133,19 +139,17 @@ model Prescription {
   mimeType          String
   fileSize          Int
   quantity          Int?
-  unitPrice         Float?
-  deliveryFee       Float?
-  deliveryAddress   String?
-  phoneNumber       String?
   status            PrescriptionStatus @default(PENDING_REVIEW)
   ocrText           String?
   ocrConfidence     Float?
   reviewReason      String?
   reviewedById      String?
   reviewedAt        DateTime?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user              User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   deliveryRequests  DeliveryRequest[]
 }
 

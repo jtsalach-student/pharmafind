@@ -1,6 +1,7 @@
-import { AlertCircle, AlertTriangle, ArrowRight, Boxes, Loader2, PackageSearch, ShieldCheck, TrendingUp } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowLeft, Boxes, Loader2, PackageSearch, ShieldCheck, TrendingUp } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { getInventory } from '../lib/data';
 
 interface InventoryItem {
@@ -10,14 +11,20 @@ interface InventoryItem {
   quantity: number;
   isAvailable: boolean;
   isActive: boolean;
+  price?: number;
+  expiryDate?: string;
+  batchNumber?: string;
   drug?: {
     id: string;
     genericName: string;
     brandName: string;
+    drugType?: string;
+    strength?: string;
   };
 }
 
 export function InventoryPage() {
+  const navigate = useNavigate();
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +52,15 @@ export function InventoryPage() {
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <button
+        type="button"
+        onClick={() => navigate(-1)}
+        className="mb-4 inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-900"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back
+      </button>
+
       <section className="rounded-[30px] border border-slate-200 bg-white/80 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.05)] backdrop-blur">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -118,9 +134,19 @@ export function InventoryPage() {
                     className="rounded-[22px] border border-slate-200 bg-slate-50 p-4"
                   >
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
+                      <div className="flex-1">
                         <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500">{item.drug?.genericName || item.drugId}</div>
                         <div className="mt-1 text-base font-bold text-slate-900">{item.drug?.brandName || 'Unknown drug'}</div>
+                        {item.drug?.drugType && (
+                          <div className="mt-1 text-xs text-slate-600">
+                            <span className="font-semibold">Type:</span> {item.drug.drugType}
+                          </div>
+                        )}
+                        {item.drug?.strength && (
+                          <div className="text-xs text-slate-600">
+                            <span className="font-semibold">Strength:</span> {item.drug.strength}
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2">
@@ -139,21 +165,32 @@ export function InventoryPage() {
                       </div>
                     </div>
 
-                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                       <div className="rounded-2xl bg-white p-3">
-                        <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">On hand</div>
+                        <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Quantity</div>
                         <div className="mt-1 text-xl font-black text-slate-900">{item.quantity}</div>
                       </div>
+                      {item.price && (
+                        <div className="rounded-2xl bg-white p-3">
+                          <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Price</div>
+                          <div className="mt-1 text-xl font-black text-emerald-700">GH₵ {Number(item.price).toFixed(2)}</div>
+                        </div>
+                      )}
+                      {item.expiryDate && (
+                        <div className="rounded-2xl bg-white p-3">
+                          <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Expiry</div>
+                          <div className="mt-1 text-sm font-semibold text-slate-900">{new Date(item.expiryDate).toLocaleDateString()}</div>
+                        </div>
+                      )}
+                      {item.batchNumber && (
+                        <div className="rounded-2xl bg-white p-3">
+                          <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Batch</div>
+                          <div className="mt-1 text-sm font-semibold text-slate-900">{item.batchNumber}</div>
+                        </div>
+                      )}
                       <div className="rounded-2xl bg-white p-3">
-                        <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Availability</div>
-                        <div className="mt-1 text-sm font-black text-slate-900">{item.isAvailable ? 'Available' : 'Unavailable'}</div>
-                      </div>
-                      <div className="rounded-2xl bg-white p-3">
-                        <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Action</div>
-                        <button type="button" className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-sky-700">
-                          Manage
-                          <ArrowRight className="h-4 w-4" />
-                        </button>
+                        <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Status</div>
+                        <div className="mt-1 text-sm font-black text-slate-900">{item.isAvailable ? '✓ Available' : '✗ Unavailable'}</div>
                       </div>
                     </div>
                   </motion.div>

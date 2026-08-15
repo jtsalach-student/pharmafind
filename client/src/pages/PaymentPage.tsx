@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { getUser } from '../lib/auth';
+import { calculateDeliveryFee } from '../lib/geolocation';
 import { getSupabaseClient } from '../lib/supabase';
 
 const MOCK_PAYMENT_MODE = true;
@@ -17,7 +18,7 @@ type PaymentRouteState = {
   pharmacyName?: string;
   quantity?: number;
   unitPrice?: number;
-  deliveryFee?: number;
+  distanceKm?: number;
   requiresRx?: boolean;
 };
 
@@ -33,7 +34,8 @@ export function PaymentPage() {
 
   const quantity = routeState.quantity ?? 1;
   const unitPrice = routeState.unitPrice ?? 0;
-  const deliveryFee = routeState.deliveryFee ?? 2.5;
+  const distanceKm = routeState.distanceKm ?? 0;
+  const deliveryFee = calculateDeliveryFee(distanceKm);
   const subtotal = Number((quantity * unitPrice).toFixed(2));
   const totalCost = Number((subtotal + deliveryFee).toFixed(2));
 
@@ -138,7 +140,21 @@ export function PaymentPage() {
       }
 
       console.log('Delivery record created', { deliveryId: delivery.id, status: delivery.status });
-      console.log('Notification created', { userId, message: 'Your order has been sent for delivery.' });
+      const orderNumber = `ORD-${delivery.id.slice(0, 8).toUpperCase()}`;
+      
+      // Dispatch initial "Order Being Prepared" notification to user
+      try {
+        await client.from('Notification').insert([{
+          userId: userId,
+          message: `Order Being Prepared: Your order #${orderNumber} for ${routeState.drugName || 'Medication'} has been received by ${routeState.pharmacyName || 'Pharmacy'} and is being prepared.`,
+          type: 'ORDER_BEING_PREPARED',
+          provider: 'SYSTEM',
+          status: 'SENT'
+        }]);
+      } catch (notifErr) {
+        console.warn('Failed to insert initial notification:', notifErr);
+      }
+
       console.info('[Payment] Mock payment succeeded', {
         deliveryId: delivery.id,
         prescriptionId,
@@ -147,10 +163,10 @@ export function PaymentPage() {
         result
       });
 
-      setStatus('Mock payment successful! Delivery is being arranged.');
+      setStatus('Mock payment successful! Your pharmacy order is being prepared.');
       navigate(`/mock-delivery/${delivery.id}`, {
         replace: true,
-        state: { delivery: { ...delivery, orderNumber: `MOCK-${delivery.id.slice(0, 8).toUpperCase()}`, pharmacyName: routeState.pharmacyName || 'PharmaFind Pharmacy', drugName: routeState.drugName || 'Medication', deliveryAddress: 'Legon, Accra' } }
+        state: { delivery: { ...delivery, orderNumber, pharmacyName: routeState.pharmacyName || 'PharmaFind Pharmacy', drugName: routeState.drugName || 'Medication', deliveryAddress: 'Legon, Accra' } }
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to process mock payment.';

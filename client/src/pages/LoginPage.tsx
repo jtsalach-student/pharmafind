@@ -169,12 +169,7 @@ export function LoginPage() {
             </div>
 
             <div>
-              <div className="mb-2 flex items-center justify-between">
-                <label htmlFor="password" className="text-sm font-semibold text-slate-700">Password</label>
-                <button type="button" onClick={() => setShowPassword((s) => !s)} className="text-xs font-semibold text-sky-600 hover:text-sky-700" aria-label="Toggle password visibility">
-                  {showPassword ? 'Hide' : 'Show'}
-                </button>
-              </div>
+              <label htmlFor="password" className="mb-2 block text-sm font-semibold text-slate-700">Password</label>
               <div className="relative">
                 <input id="password" type={showPassword ? 'text' : 'password'} className="input-shell pr-12" {...register('password')} aria-invalid={!!errors.password} />
                 <button type="button" onClick={() => setShowPassword((s) => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-slate-500 hover:text-slate-700" aria-label="Toggle password">

@@ -2,9 +2,11 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { Nav } from './components/Nav';
 import { ProtectedRoute, RoleProtectedRoute } from './components/ProtectedRoute';
+import { CartProvider } from './contexts/CartContext';
 import { getToken } from './lib/auth';
 import { AdminAuditPage } from './pages/AdminAuditPage';
 import { CheckEmailPage } from './pages/CheckEmailPage';
+import { CheckoutPage } from './pages/CheckoutPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { PaymentPage } from './pages/PaymentPage';
 import { DeliveryTrackingPage } from './pages/DeliveryTrackingPage';
@@ -13,6 +15,7 @@ import DriverDashboardPage from './pages/DriverDashboardPage';
 import { EmergencyPage } from './pages/EmergencyPage';
 import { EnvDebugPage } from './pages/EnvDebugPage';
 import { GenericPage } from './pages/GenericPage';
+import { NotificationsPage } from './pages/NotificationsPage';
 import { InventoryPage } from './pages/InventoryPage';
 import { LoginPage } from './pages/LoginPage';
 import { PharmacistReviewPage } from './pages/PharmacistReviewPage';
@@ -42,6 +45,7 @@ function AppRoutes() {
 
           <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
           <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
+          <Route path="/checkout" element={<ProtectedRoute><CheckoutPage /></ProtectedRoute>} />
           <Route path="/emergency" element={<EmergencyPage />} />
           <Route path="/pharmacy/:pharmacyId" element={<PharmacyDetailsPage />} />
           <Route path="/route/:pharmacyId" element={<RoutePage />} />
@@ -56,11 +60,11 @@ function AppRoutes() {
           <Route path="/driver-tracking/:deliveryId" element={<RoleProtectedRoute allowedRoles={['DRIVER', 'SYSTEM_ADMIN']}><MockDeliveryTrackingPage /></RoleProtectedRoute>} />
           <Route path="/debug/env" element={<EnvDebugPage />} />
           <Route path="/payments" element={<ProtectedRoute><GenericPage title="Payment" /></ProtectedRoute>} />
-          <Route path="/notifications" element={<ProtectedRoute><GenericPage title="User notifications" /></ProtectedRoute>} />
+          <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
           <Route path="/admin" element={<RoleProtectedRoute allowedRoles={['SYSTEM_ADMIN']}><AdminAuditPage /></RoleProtectedRoute>} />
           <Route path="/inventory" element={<ProtectedRoute><InventoryPage /></ProtectedRoute>} />
           <Route path="/pharmacist" element={<RoleProtectedRoute allowedRoles={['PHARMACIST', 'SYSTEM_ADMIN']}><PharmacistReviewPage /></RoleProtectedRoute>} />
-          <Route path="/driver" element={<RoleProtectedRoute allowedRoles={['DRIVER', 'SYSTEM_ADMIN']}><GenericPage title="Driver deliveries and GPS updates" /></RoleProtectedRoute>} />
+          <Route path="/driver" element={<RoleProtectedRoute allowedRoles={['DRIVER', 'SYSTEM_ADMIN']}><DriverDashboardPage /></RoleProtectedRoute>} />
           <Route path="/system" element={<RoleProtectedRoute allowedRoles={['SYSTEM_ADMIN']}><AdminAuditPage /></RoleProtectedRoute>} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
@@ -74,10 +78,12 @@ function App() {
   const hasSession = Boolean(getToken());
 
   return (
-    <>
-      {hasSession && <Nav />}
-      <AppRoutes />
-    </>
+    <CartProvider>
+      <>
+        {hasSession && <Nav />}
+        <AppRoutes />
+      </>
+    </CartProvider>
   );
 }
 

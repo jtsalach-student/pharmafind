@@ -1,9 +1,11 @@
 import { motion } from 'framer-motion';
-import { AlertTriangle, ArrowRight, MapPin, Phone, ShieldAlert, TimerReset } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, MapPin, Phone, ShieldAlert, TimerReset } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { calculateDistance, estimateDeliveryTime, getDeviceLocation, type Coordinates } from '../lib/geolocation';
+import { getDeviceLocation, type Coordinates } from '../lib/geolocation';
+import { fetchRoadRoute } from '../lib/routing';
 import { getSupabaseClient } from '../lib/supabase';
+import { isPharmacyOpen } from '../lib/data';
 
 type EmergencyDrug = {
   id: string;
@@ -11,6 +13,7 @@ type EmergencyDrug = {
   brandName: string;
   category: string;
   isEmergency: boolean;
+  price?: number | string;
 };
 
 type EmergencyResult = {
@@ -23,6 +26,10 @@ type EmergencyResult = {
   distanceKm: number;
   etaMinutes: number;
   stock: number;
+  price: number;
+  isOpen: boolean;
+  opensAt?: string;
+  closesAt?: string;
 };
 
 export function EmergencyPage() {
@@ -114,45 +121,56 @@ export function EmergencyPage() {
       const client = getSupabaseClient();
       const { data: inventoryData, error: inventoryError } = await client
         .from('Inventory')
-        .select('id, quantity, pharmacyId, drugId')
+        .select('id, quantity, price, expiryDate, pharmacyId, drugId, isActive, isAvailable')
         .eq('drugId', drug.id)
+        .eq('isActive', true)
+        .eq('isAvailable', true)
         .gt('quantity', 0);
 
       if (inventoryError) throw inventoryError;
 
-      if (!inventoryData || inventoryData.length === 0) {
+      // Filter out expired items
+      const nowUtc = new Date();
+      const todayAccra = new Date(nowUtc.toLocaleString('en-US', { timeZone: 'Africa/Accra' }));
+      todayAccra.setHours(0, 0, 0, 0);
+      const validInventory = (inventoryData ?? []).filter((item) => {
+        if (!item.expiryDate) return true;
+        const exp = new Date(item.expiryDate);
+        exp.setHours(0, 0, 0, 0);
+        return exp >= todayAccra;
+      });
+
+      if (!validInventory || validInventory.length === 0) {
         setResults([]);
-        setLookupError(`No pharmacies currently have ${drug.genericName} in stock.`);
+        setLookupError(`No pharmacies currently have unexpired ${drug.genericName} in stock.`);
         setLoadingResults(false);
         return;
       }
 
-      const pharmacyIds = [...new Set(inventoryData.map((item) => item.pharmacyId))];
+      const pharmacyIds = [...new Set(validInventory.map((item) => item.pharmacyId))];
       const { data: pharmacies, error: pharmacyError } = await client
         .from('Pharmacy')
-        .select('id, name, address, phone, latitude, longitude')
+        .select('id, name, address, phone, latitude, longitude, opensAt, closesAt')
         .in('id', pharmacyIds);
 
       if (pharmacyError) throw pharmacyError;
 
       const pharmacyMap = new Map((pharmacies ?? []).map((pharmacy) => [pharmacy.id, pharmacy]));
 
-      const matchingPharmacies = (inventoryData ?? [])
-        .map((entry) => {
+      const matchingPharmacies = await Promise.all(
+        validInventory.map(async (entry): Promise<EmergencyResult | null> => {
           const pharmacy = pharmacyMap.get(entry.pharmacyId);
           if (!pharmacy || pharmacy.latitude == null || pharmacy.longitude == null) {
             return null;
           }
 
-          const distanceKm = calculateDistance(currentLocation, {
-            latitude: pharmacy.latitude,
-            longitude: pharmacy.longitude
-          });
+          const roadRoute = await fetchRoadRoute(
+            [pharmacy.latitude, pharmacy.longitude],
+            [currentLocation.latitude, currentLocation.longitude]
+          );
 
-          const etaMinutes = estimateDeliveryTime(distanceKm);
-          console.log('Pharmacy Location', pharmacy.latitude, pharmacy.longitude);
-          console.log('Distance', Number(distanceKm.toFixed(1)));
-          console.log('ETA', etaMinutes);
+          const numericPrice = Number(entry.price ?? drug.price ?? 0);
+          const open = isPharmacyOpen((pharmacy as any).opensAt, (pharmacy as any).closesAt);
 
           return {
             id: pharmacy.id,
@@ -161,16 +179,27 @@ export function EmergencyPage() {
             phone: pharmacy.phone || 'No phone listed',
             latitude: pharmacy.latitude,
             longitude: pharmacy.longitude,
-            distanceKm: Number(distanceKm.toFixed(1)),
-            etaMinutes,
-            stock: Number(entry.quantity ?? 0)
-          } satisfies EmergencyResult;
+            distanceKm: roadRoute.distanceKm,
+            etaMinutes: roadRoute.etaMinutes,
+            stock: Number(entry.quantity ?? 0),
+            price: numericPrice,
+            isOpen: open,
+            opensAt: (pharmacy as any).opensAt ?? undefined,
+            closesAt: (pharmacy as any).closesAt ?? undefined
+          };
         })
-        .filter((item): item is EmergencyResult => Boolean(item))
-        .sort((a, b) => a.distanceKm - b.distanceKm);
+      );
 
-      setResults(matchingPharmacies);
-      if (matchingPharmacies.length === 0) {
+      // Open first → then nearest by road distance
+      const sortedPharmacies = matchingPharmacies
+        .filter((item): item is EmergencyResult => Boolean(item))
+        .sort((a, b) => {
+          if (a.isOpen !== b.isOpen) return a.isOpen ? -1 : 1;
+          return a.distanceKm - b.distanceKm;
+        });
+
+      setResults(sortedPharmacies);
+      if (sortedPharmacies.length === 0) {
         setLookupError(`No pharmacies currently have ${drug.genericName} in stock.`);
       }
     } catch (error: any) {
@@ -191,6 +220,14 @@ export function EmergencyPage() {
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <button
+        type="button"
+        onClick={() => navigate(-1)}
+        className="mb-4 inline-flex items-center gap-2 text-sm font-semibold text-red-600 hover:text-red-700"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back
+      </button>
       <div className="overflow-hidden rounded-[32px] border border-red-200 bg-gradient-to-br from-red-600 via-red-500 to-orange-500 p-6 text-white shadow-[0_30px_80px_rgba(239,68,68,0.28)] sm:p-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
@@ -283,8 +320,8 @@ export function EmergencyPage() {
                   <div className="rounded-full bg-red-50 px-3 py-1 text-sm font-bold text-red-600">{drug.brandName}</div>
                 </div>
 
-                <div className="mt-4 flex items-center justify-between rounded-2xl border border-red-100 bg-white px-3 py-2 text-sm font-medium text-slate-600">
-                  <div className="flex items-center gap-2"><ShieldAlert className="h-4 w-4 text-red-600" /> Immediate availability check</div>
+                <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-red-100 bg-white px-3 py-2 text-sm font-medium text-slate-600">
+                  <div className="flex items-center gap-2"><ShieldAlert className="h-4 w-4 text-red-600" /> Price: GHS {Number(drug.price ?? 0).toFixed(2)}</div>
                   <ArrowRight className="h-4 w-4 text-red-600" />
                 </div>
               </motion.button>
@@ -317,6 +354,19 @@ export function EmergencyPage() {
                   <div className="mt-1 text-sm font-semibold text-slate-800">{nearestResult.address}</div>
                 </div>
                 <div className="rounded-2xl bg-slate-50 p-3">
+                  <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Status</div>
+                  <div className={`mt-1 text-lg font-black ${
+                    nearestResult.isOpen ? 'text-emerald-700' : 'text-red-600'
+                  }`}>
+                    {nearestResult.isOpen ? 'OPEN NOW' : 'CLOSED'}
+                  </div>
+                  {nearestResult.opensAt && nearestResult.closesAt && (
+                    <div className="mt-0.5 text-xs text-slate-500">
+                      Hours: {nearestResult.opensAt} – {nearestResult.closesAt}
+                    </div>
+                  )}
+                </div>
+                <div className="rounded-2xl bg-slate-50 p-3">
                   <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Phone</div>
                   <div className="mt-1 text-sm font-semibold text-slate-800">{nearestResult.phone}</div>
                 </div>
@@ -329,6 +379,10 @@ export function EmergencyPage() {
                     <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">ETA</div>
                     <div className="mt-1 text-lg font-black text-slate-900">{nearestResult.etaMinutes} min</div>
                   </div>
+                </div>
+                <div className="rounded-2xl bg-slate-50 p-3">
+                  <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Price</div>
+                  <div className="mt-1 text-lg font-black text-emerald-700">GHS {nearestResult.price.toFixed(2)}</div>
                 </div>
                 <div className="rounded-2xl bg-slate-50 p-3">
                   <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Available stock</div>

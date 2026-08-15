@@ -56,8 +56,50 @@ router.post('/send', requireAuth, requireRoles(Role.SYSTEM_ADMIN, Role.PHARMACY_
 
 router.get('/my', requireAuth, async (req, res, next) => {
   try {
-    const items = await prisma.notification.findMany({ where: { userId: req.user!.id }, orderBy: { createdAt: 'desc' } });
+    const items = await prisma.notification.findMany({
+      where: { userId: req.user!.id },
+      orderBy: { createdAt: 'desc' },
+      take: 50
+    });
     res.json({ items });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch('/:id/read', requireAuth, async (req, res, next) => {
+  try {
+    const id = String(req.params.id);
+    const notification = await prisma.notification.findUnique({ where: { id } });
+    if (!notification || notification.userId !== req.user!.id) {
+      res.status(404).json({
+        error: {
+          message: 'Notification not found',
+          requestId: req.requestId
+        }
+      });
+      return;
+    }
+
+    const updated = await prisma.notification.update({
+      where: { id },
+      data: { status: 'DELIVERED', updatedAt: new Date() }
+    });
+
+    res.json({ notification: updated });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/read-all', requireAuth, async (req, res, next) => {
+  try {
+    await prisma.notification.updateMany({
+      where: { userId: req.user!.id },
+      data: { status: 'DELIVERED', updatedAt: new Date() }
+    });
+
+    res.json({ success: true, message: 'All notifications marked as read' });
   } catch (error) {
     next(error);
   }

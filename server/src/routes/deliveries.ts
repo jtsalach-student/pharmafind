@@ -86,7 +86,7 @@ router.get('/:id', requireAuth, async (req, res, next) => {
   }
 });
 
-router.patch('/:id/status', requireAuth, requireRoles(Role.DRIVER, Role.PHARMACY_ADMIN, Role.SYSTEM_ADMIN), async (req, res, next) => {
+router.patch('/:id/status', requireAuth, requireRoles(Role.DRIVER, Role.PHARMACIST, Role.PHARMACY_ADMIN, Role.SYSTEM_ADMIN), async (req, res, next) => {
   try {
     const deliveryId = String(req.params.id);
     const parsed = z.object({ status: z.nativeEnum(DeliveryStatus) }).safeParse(req.body);

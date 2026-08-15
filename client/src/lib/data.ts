@@ -1,5 +1,60 @@
 import { getSupabaseClient, type AppRole } from './supabase';
-import { calculateDistance, estimateDeliveryTime, type Coordinates } from './geolocation';
+import { calculateDistance, type Coordinates } from './geolocation';
+import { fetchRoadRoute } from './routing';
+
+/**
+ * Determine if a pharmacy is currently open based on Ghana/Accra local time.
+ * Handles both normal hours (e.g. 07:00–22:00) and overnight spans (e.g. 22:00–06:00).
+ * Falls back to CLOSED when times are missing or unparseable.
+ */
+export function isPharmacyOpen(opensAt: string | null | undefined, closesAt: string | null | undefined): boolean {
+  if (!opensAt || !closesAt) return false; // Missing hours → treat as CLOSED, never recommend
+
+  try {
+    // Use Accra/Ghana time (UTC+0 year-round; no DST)
+    const nowUtc = new Date();
+    const nowAccra = new Date(nowUtc.toLocaleString('en-US', { timeZone: 'Africa/Accra' }));
+    const currentMinutes = nowAccra.getHours() * 60 + nowAccra.getMinutes();
+
+    const [openH, openM] = opensAt.split(':').map(Number);
+    const [closeH, closeM] = closesAt.split(':').map(Number);
+
+    if ([openH, openM, closeH, closeM].some((n) => !Number.isFinite(n))) return false;
+
+    const openMinutes = openH * 60 + openM;
+    const closeMinutes = closeH * 60 + closeM;
+
+    // Overnight span: e.g. 22:00 → 06:00
+    if (closeMinutes <= openMinutes) {
+      return currentMinutes >= openMinutes || currentMinutes < closeMinutes;
+    }
+
+    // Normal span: e.g. 07:00 → 22:00
+    return currentMinutes >= openMinutes && currentMinutes < closeMinutes;
+  } catch {
+    return false; // Parse error → treat as CLOSED
+  }
+}
+
+/**
+ * Return true if an inventory item is expired relative to today (Accra time).
+ */
+function isInventoryExpired(expiryDate: string | null | undefined): boolean {
+  if (!expiryDate) return false;
+
+  try {
+    const nowUtc = new Date();
+    const todayAccra = new Date(nowUtc.toLocaleString('en-US', { timeZone: 'Africa/Accra' }));
+    todayAccra.setHours(0, 0, 0, 0);
+
+    const expiry = new Date(expiryDate);
+    expiry.setHours(0, 0, 0, 0);
+
+    return expiry < todayAccra;
+  } catch {
+    return false;
+  }
+}
 
 export type DashboardStats = {
   label: string;
@@ -18,6 +73,20 @@ export type PharmacyRecord = {
   longitude?: number;
   opensAt?: string;
   closesAt?: string;
+  isOpen?: boolean;
+};
+
+export type DrugRecord = {
+  id: string;
+  genericName: string;
+  brandName: string;
+  category?: string;
+  price?: number | string;
+  isEmergency?: boolean;
+  requiresRx?: boolean;
+  drugType?: string;
+  strength?: string;
+  indication?: string;
 };
 
 export type PrescriptionRecord = {
@@ -27,6 +96,17 @@ export type PrescriptionRecord = {
   filePath?: string;
   originalFileName?: string;
   createdAt: string;
+  drugId?: string;
+  quantity?: number;
+  drug?: {
+    id: string;
+    genericName: string;
+    brandName: string;
+    category?: string;
+    drugType?: string;
+    strength?: string;
+    indication?: string;
+  };
 };
 
 export type DeliveryRecord = {
@@ -36,9 +116,23 @@ export type DeliveryRecord = {
   status: string;
   latitude?: number;
   longitude?: number;
+  distanceKm?: number;
+  deliveryAddress?: string;
+  phoneNumber?: string;
   createdAt: string;
   requestedAt?: string;
   updatedAt?: string;
+  gpsLocations?: Array<{ latitude: number; longitude: number; createdAt: string }>;
+  prescription?: {
+    id: string;
+    userId: string;
+    drugId?: string;
+    pharmacyId?: string;
+    quantity?: number;
+    status: string;
+    drug?: DrugRecord;
+    pharmacy?: PharmacyRecord;
+  };
 };
 
 export async function getDashboardData(role: AppRole) {
@@ -133,42 +227,73 @@ export async function getPharmacies(): Promise<PharmacyRecord[]> {
   return data ?? [];
 }
 
-export async function getNearbyPharmacies(patientLocation: Coordinates, radiusKm: number = 10): Promise<(PharmacyRecord & { distanceKm: number; etaMinutes: number })[]> {
-  const pharmacies = await getPharmacies();
+export async function getNearbyPharmacies(
+  patientLocation: Coordinates,
+  radiusKm: number = 10
+): Promise<(PharmacyRecord & { distanceKm: number; etaMinutes: number; isOpen: boolean })[]> {
+  const supabase = getSupabaseClient();
 
-  return pharmacies
-    .map((pharmacy) => {
-      if (!pharmacy.latitude || !pharmacy.longitude) return null;
+  // Fetch pharmacies with opening hours so we can compute open status
+  const { data, error } = await supabase
+    .from('Pharmacy')
+    .select('id, name, address, phone, latitude, longitude, opensAt, closesAt');
+  if (error) throw error;
 
-      const distance = calculateDistance(
-        { latitude: patientLocation.latitude, longitude: patientLocation.longitude },
-        { latitude: pharmacy.latitude, longitude: pharmacy.longitude }
+  const pharmacies = (data ?? []) as PharmacyRecord[];
+
+  const results = await Promise.all(
+    pharmacies.map(async (pharmacy) => {
+      if (pharmacy.latitude == null || pharmacy.longitude == null) return null;
+
+      const roadRoute = await fetchRoadRoute(
+        [pharmacy.latitude, pharmacy.longitude],
+        [patientLocation.latitude, patientLocation.longitude]
       );
 
-      if (distance > radiusKm) return null;
+      if (roadRoute.distanceKm > radiusKm) return null;
 
       return {
         ...pharmacy,
-        distanceKm: parseFloat(distance.toFixed(2)),
-        etaMinutes: estimateDeliveryTime(distance)
+        distanceKm: roadRoute.distanceKm,
+        etaMinutes: roadRoute.etaMinutes,
+        isOpen: isPharmacyOpen(pharmacy.opensAt, pharmacy.closesAt)
       };
     })
-    .filter((p) => p !== null)
-    .sort((a, b) => (a?.distanceKm ?? 0) - (b?.distanceKm ?? 0));
+  );
+
+  return results
+    .filter((p): p is PharmacyRecord & { distanceKm: number; etaMinutes: number; isOpen: boolean } => Boolean(p))
+    // Open first, then by road distance
+    .sort((a, b) => {
+      if (a.isOpen !== b.isOpen) return a.isOpen ? -1 : 1;
+      return a.distanceKm - b.distanceKm;
+    });
 }
 
 export type DrugStockResult = {
   drugId: string;
   drugName: string;
   brandName: string;
+  drugType?: string;
+  strength?: string;
+  indication?: string;
+  category?: string;
+  requiresRx?: boolean;
+  isEmergency?: boolean;
   price: number;
   pharmacyId: string;
   pharmacyName: string;
+  pharmacyIsOpen: boolean;
+  pharmacyOpensAt?: string;
+  pharmacyClosesAt?: string;
   address: string;
   phone: string;
   latitude: number;
   longitude: number;
   stock: number;
+  inventoryPrice?: number;
+  expiryDate?: string;
+  batchNumber?: string;
   distanceKm: number;
   etaMinutes: number;
 };
@@ -183,7 +308,7 @@ export async function searchDrugAvailability(patientLocation: Coordinates, query
 
   const { data: drugs, error: drugError } = await supabase
     .from('Drug')
-    .select('id, genericName, brandName, category, isEmergency, requiresRx, price')
+    .select('id, genericName, brandName, category, isEmergency, requiresRx, price, drugType, strength, indication')
     .or(`genericName.ilike.%${trimmed}%,brandName.ilike.%${trimmed}%`)
     .limit(20);
 
@@ -197,10 +322,13 @@ export async function searchDrugAvailability(patientLocation: Coordinates, query
 
   const drugIds = drugs.map((drug) => drug.id);
 
+  // Filter: active, available, has quantity
   const { data: inventoryData, error: inventoryError } = await supabase
     .from('Inventory')
-    .select('id, quantity, pharmacyId, drugId')
+    .select('id, quantity, price, expiryDate, batchNumber, pharmacyId, drugId, isActive, isAvailable')
     .in('drugId', drugIds)
+    .eq('isActive', true)
+    .eq('isAvailable', true)
     .gt('quantity', 0);
 
   if (inventoryError) {
@@ -211,10 +339,22 @@ export async function searchDrugAvailability(patientLocation: Coordinates, query
     return [];
   }
 
-  const pharmacyIds = [...new Set(inventoryData.map((item) => item.pharmacyId))];
+  // Filter out expired inventory
+  const validInventory = inventoryData.filter(item =>
+    !isInventoryExpired(item.expiryDate) &&
+    Number(item.quantity ?? 0) > 0 &&
+    item.isActive === true &&
+    item.isAvailable === true
+  );
+
+  if (validInventory.length === 0) {
+    return [];
+  }
+
+  const pharmacyIds = [...new Set(validInventory.map((item) => item.pharmacyId))];
   const { data: pharmacies, error: pharmacyError } = await supabase
     .from('Pharmacy')
-    .select('id, name, address, phone, latitude, longitude')
+    .select('id, name, address, phone, latitude, longitude, opensAt, closesAt')
     .in('id', pharmacyIds);
 
   if (pharmacyError) {
@@ -224,8 +364,8 @@ export async function searchDrugAvailability(patientLocation: Coordinates, query
   const pharmacyMap = new Map((pharmacies ?? []).map((pharmacy) => [pharmacy.id, pharmacy]));
   const drugMap = new Map((drugs ?? []).map((drug) => [drug.id, drug]));
 
-  return inventoryData
-    .map((entry) => {
+  const results = await Promise.all(
+    validInventory.map(async (entry) => {
       const drug = drugMap.get(entry.drugId);
       const pharmacy = pharmacyMap.get(entry.pharmacyId);
 
@@ -233,37 +373,93 @@ export async function searchDrugAvailability(patientLocation: Coordinates, query
         return null;
       }
 
-      const distanceKm = calculateDistance(patientLocation, {
-        latitude: pharmacy.latitude,
-        longitude: pharmacy.longitude
-      });
+      // Compute road network distance and ETA via routing engine
+      const roadRoute = await fetchRoadRoute(
+        [pharmacy.latitude, pharmacy.longitude],
+        [patientLocation.latitude, patientLocation.longitude]
+      );
+
+      const isOpen = isPharmacyOpen(pharmacy.opensAt, pharmacy.closesAt);
+
+      const numericDrugPrice = Number(drug.price ?? 0);
+      const numericInventoryPrice = Number(entry.price ?? 0);
+      const effectivePrice = Number.isFinite(numericInventoryPrice) && numericInventoryPrice > 0
+        ? numericInventoryPrice
+        : (Number.isFinite(numericDrugPrice) && numericDrugPrice > 0 ? numericDrugPrice : 0);
 
       return {
         drugId: drug.id,
         drugName: drug.genericName,
         brandName: drug.brandName,
-        price: Number(drug.price ?? 0),
+        drugType: drug.drugType,
+        strength: drug.strength,
+        indication: drug.indication,
+        category: drug.category,
+        requiresRx: drug.requiresRx,
+        isEmergency: drug.isEmergency,
+        price: effectivePrice,
         pharmacyId: pharmacy.id,
         pharmacyName: pharmacy.name,
+        pharmacyIsOpen: isOpen,
+        pharmacyOpensAt: pharmacy.opensAt ?? undefined,
+        pharmacyClosesAt: pharmacy.closesAt ?? undefined,
         address: pharmacy.address ?? 'Address unavailable',
         phone: pharmacy.phone || 'No phone listed',
         latitude: pharmacy.latitude,
         longitude: pharmacy.longitude,
         stock: Number(entry.quantity ?? 0),
-        distanceKm: Number(distanceKm.toFixed(1)),
-        etaMinutes: estimateDeliveryTime(distanceKm)
-      } satisfies DrugStockResult;
+        inventoryPrice: effectivePrice,
+        expiryDate: entry.expiryDate,
+        batchNumber: entry.batchNumber,
+        distanceKm: roadRoute.distanceKm,
+        etaMinutes: roadRoute.etaMinutes
+      } as DrugStockResult;
     })
+  );
+
+  return results
     .filter((item): item is DrugStockResult => Boolean(item))
-    .sort((a, b) => a.distanceKm - b.distanceKm);
+    // Sort: open pharmacies first → then by shortest road network distance
+    .sort((a, b) => {
+      if (a.pharmacyIsOpen !== b.pharmacyIsOpen) return a.pharmacyIsOpen ? -1 : 1;
+      return a.distanceKm - b.distanceKm;
+    });
 }
 
 export async function getPrescriptions(): Promise<PrescriptionRecord[]> {
   const supabase = getSupabaseClient();
 
-  const { data, error } = await supabase.from('Prescription').select('*').order('createdAt', { ascending: false });
+  const { data: prescriptions, error } = await supabase
+    .from('Prescription')
+    .select('id, userId, status, filePath, originalFileName, createdAt, drugId, quantity, deliveryRequests:DeliveryRequest(id, status)')
+    .order('createdAt', { ascending: false });
+  
   if (error) throw error;
-  return data ?? [];
+  
+  if (!prescriptions || prescriptions.length === 0) {
+    return [];
+  }
+
+  // Fetch related drug data if drugIds exist
+  const drugIds = [...new Set((prescriptions as any[]).map(p => p.drugId).filter(Boolean))];
+  
+  if (drugIds.length === 0) {
+    return prescriptions as PrescriptionRecord[];
+  }
+
+  const { data: drugs, error: drugError } = await supabase
+    .from('Drug')
+    .select('id, genericName, brandName, category, drugType, strength, indication')
+    .in('id', drugIds);
+
+  if (drugError) throw drugError;
+
+  const drugMap = new Map((drugs ?? []).map(d => [d.id, d]));
+
+  return (prescriptions as any[]).map(p => ({
+    ...p,
+    drug: p.drugId ? drugMap.get(p.drugId) : undefined
+  })) as PrescriptionRecord[];
 }
 
 export async function getPrescriptionById(id: string) {
@@ -277,9 +473,88 @@ export async function getPrescriptionById(id: string) {
 export async function getDeliveries(): Promise<DeliveryRecord[]> {
   const supabase = getSupabaseClient();
 
-  const { data, error } = await supabase.from('DeliveryRequest').select('*').order('requestedAt', { ascending: false });
+  const { data, error } = await supabase
+    .from('DeliveryRequest')
+    .select(`
+      *,
+      prescription:Prescription(
+        id,
+        userId,
+        drugId,
+        pharmacyId,
+        quantity,
+        status
+      ),
+      gpsLocations:GPSLocation(
+        latitude,
+        longitude,
+        createdAt
+      )
+    `)
+    .order('requestedAt', { ascending: false });
+  
   if (error) throw error;
-  return data ?? [];
+  
+  const deliveries = data ?? [];
+  
+  if (deliveries.length > 0) {
+    const drugIds = [...new Set((deliveries as any[]).map(d => d.prescription?.drugId).filter(Boolean))];
+    const pharmacyIds = [...new Set((deliveries as any[]).map(d => d.prescription?.pharmacyId).filter(Boolean))];
+    
+    const [drugsResult, pharmaciesResult, inventoryResult] = await Promise.all([
+      drugIds.length > 0
+        ? supabase.from('Drug').select('id, genericName, brandName, category, isEmergency, requiresRx, price, drugType, strength, indication').in('id', drugIds)
+        : Promise.resolve({ data: [] as any[], error: null }),
+      pharmacyIds.length > 0
+        ? supabase.from('Pharmacy').select('id, name, address, latitude, longitude, opensAt, closesAt').in('id', pharmacyIds)
+        : Promise.resolve({ data: [] as any[], error: null }),
+      (pharmacyIds.length > 0 && drugIds.length > 0)
+        ? supabase.from('Inventory').select('pharmacyId, drugId, price').in('pharmacyId', pharmacyIds).in('drugId', drugIds)
+        : Promise.resolve({ data: [] as any[], error: null })
+    ]);
+
+    const drugMap = new Map((drugsResult.data ?? []).map(d => [d.id, d]));
+    const pharmacyMap = new Map((pharmaciesResult.data ?? []).map(p => [p.id, p]));
+    const inventoryMap = new Map((inventoryResult.data ?? []).map(i => [`${i.pharmacyId}-${i.drugId}`, i]));
+
+    return (deliveries as any[]).map(d => {
+      const presc = d.prescription;
+      const drug = presc?.drugId ? drugMap.get(presc.drugId) : undefined;
+      const pharmacy = presc?.pharmacyId ? pharmacyMap.get(presc.pharmacyId) : undefined;
+      const inv = (presc?.pharmacyId && presc?.drugId) ? inventoryMap.get(`${presc.pharmacyId}-${presc.drugId}`) : undefined;
+
+      const effectivePrice = Number(inv?.price ?? drug?.price ?? 0);
+
+      // Use stored delivery distanceKm if available, otherwise a road-factor estimate
+      let distanceKm = d.distanceKm ?? 2.5;
+      if (!d.distanceKm && pharmacy?.latitude != null && pharmacy?.longitude != null) {
+        // Use road-factor Haversine as a sync fallback (async fetchRoadRoute not feasible here)
+        const URBAN_ROAD_FACTOR = 1.3;
+        distanceKm = Number(
+          (calculateDistance(
+            { latitude: 5.6037, longitude: -0.1870 }, // Accra baseline
+            { latitude: pharmacy.latitude, longitude: pharmacy.longitude }
+          ) * URBAN_ROAD_FACTOR).toFixed(1)
+        );
+      }
+
+      return {
+        ...d,
+        distanceKm,
+        deliveryAddress: d.deliveryAddress ?? pharmacy?.address ?? 'Customer Location',
+        prescription: presc ? {
+          ...presc,
+          pharmacy,
+          drug: drug ? {
+            ...drug,
+            price: effectivePrice
+          } : undefined
+        } : undefined
+      };
+    }) as DeliveryRecord[];
+  }
+  
+  return deliveries as DeliveryRecord[];
 }
 
 export async function getDeliveryById(id: string) {
@@ -293,8 +568,7 @@ export async function getDeliveryById(id: string) {
 export async function getInventory(pharmacyId?: string) {
   const supabase = getSupabaseClient();
 
-  // Query inventory items with their IDs for related records
-  let query = supabase.from('Inventory').select('id, pharmacyId, drugId, quantity, isAvailable, isActive, createdAt, updatedAt');
+  let query = supabase.from('Inventory').select('id, pharmacyId, drugId, quantity, price, expiryDate, batchNumber, isAvailable, isActive, createdAt, updatedAt');
 
   if (pharmacyId) {
     query = query.eq('pharmacyId', pharmacyId);
@@ -307,16 +581,14 @@ export async function getInventory(pharmacyId?: string) {
     return [];
   }
 
-  // Fetch related drug and pharmacy data separately
   const drugIds = [...new Set(inventoryData.map(item => item.drugId))];
   const pharmacyIds = [...new Set(inventoryData.map(item => item.pharmacyId))];
 
   const [{ data: drugs }, { data: pharmacies }] = await Promise.all([
-    supabase.from('Drug').select('id, genericName, brandName, category, isEmergency').in('id', drugIds),
-    supabase.from('Pharmacy').select('id, name, address, latitude, longitude').in('id', pharmacyIds)
+    supabase.from('Drug').select('id, genericName, brandName, category, isEmergency, drugType, strength, indication').in('id', drugIds),
+    supabase.from('Pharmacy').select('id, name, address, latitude, longitude, opensAt, closesAt').in('id', pharmacyIds)
   ]);
 
-  // Manually join the data
   const drugMap = new Map((drugs ?? []).map(d => [d.id, d]));
   const pharmacyMap = new Map((pharmacies ?? []).map(p => [p.id, p]));
 

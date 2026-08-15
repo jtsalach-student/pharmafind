@@ -1,7 +1,9 @@
 import { ArrowLeft, Clock3, MapPin, Navigation, Phone } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { calculateDistance, estimateDeliveryTime, type Coordinates } from '../lib/geolocation';
+import { type Coordinates } from '../lib/geolocation';
+import { fetchRoadRoute } from '../lib/routing';
+import { MapView, type Point } from '../components/MapView';
 
 type RouteState = {
   pharmacy?: {
@@ -30,13 +32,13 @@ export function RoutePage() {
       return;
     }
 
-    const distance = calculateDistance(userLocation, {
-      latitude: pharmacy.latitude,
-      longitude: pharmacy.longitude
+    fetchRoadRoute(
+      [pharmacy.latitude, pharmacy.longitude],
+      [userLocation.latitude, userLocation.longitude]
+    ).then((route) => {
+      setDistanceKm(route.distanceKm);
+      setEtaMinutes(route.etaMinutes);
     });
-
-    setDistanceKm(Number(distance.toFixed(1)));
-    setEtaMinutes(estimateDeliveryTime(distance));
   }, [pharmacy, userLocation]);
 
   if (!pharmacy) {
@@ -48,6 +50,26 @@ export function RoutePage() {
       </main>
     );
   }
+
+  const mapPoints: Point[] = [
+    {
+      lat: userLocation?.latitude ?? 5.6506,
+      lng: userLocation?.longitude ?? -0.1870,
+      label: 'Your Location',
+      type: 'user'
+    },
+    {
+      lat: pharmacy.latitude,
+      lng: pharmacy.longitude,
+      label: pharmacy.name,
+      type: 'pharmacy'
+    }
+  ];
+
+  const centerPoint: [number, number] = [
+    userLocation?.latitude ?? 5.6506,
+    userLocation?.longitude ?? -0.1870
+  ];
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
@@ -64,10 +86,18 @@ export function RoutePage() {
         <div className="rounded-[32px] border border-slate-200 bg-white/80 p-5 shadow-[0_25px_70px_rgba(15,23,42,0.06)]">
           <div className="mb-4 flex items-center gap-3">
             <div className="rounded-2xl bg-sky-100 p-2 text-sky-700"><Navigation className="h-5 w-5" /></div>
-            <h2 className="text-2xl font-black text-slate-900">Navigation</h2>
+            <h2 className="text-2xl font-black text-slate-900">Road Network Navigation</h2>
           </div>
 
           <div className="space-y-4">
+            {/* Embedded Road Route MapView */}
+            <MapView
+              points={mapPoints}
+              center={centerPoint}
+              showRoute={true}
+              className="h-72 w-full rounded-2xl border"
+            />
+
             <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
               <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Start</div>
               <div className="mt-2 text-lg font-black text-slate-900">

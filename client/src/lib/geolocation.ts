@@ -32,6 +32,17 @@ export function estimateDeliveryTime(distanceKm: number): number {
 }
 
 /**
+ * Calculate delivery fee based on distance.
+ * Formula: Base Fee (GH₵ 2.00) + (Distance × GH₵ 1.50)
+ */
+export function calculateDeliveryFee(distanceKm: number): number {
+  const BASE_FEE = 2.0;
+  const RATE_PER_KM = 1.5;
+  const fee = BASE_FEE + (Math.max(0, distanceKm) * RATE_PER_KM);
+  return Number(fee.toFixed(2));
+}
+
+/**
  * Request device geolocation with a timeout
  */
 export async function getDeviceLocation(timeoutMs: number = 10000): Promise<Coordinates | null> {
@@ -101,6 +112,39 @@ export function clearStoredPatientLocation(): void {
   }
 }
 
+/**
+ * Resolve user location from stored patient/user location or live browser geolocation
+ */
+export async function resolveUserLocation(): Promise<Coordinates> {
+  // 1. Check patient stored location
+  const stored = getStoredPatientLocation();
+  if (stored && Number.isFinite(stored.latitude) && Number.isFinite(stored.longitude)) {
+    return { latitude: stored.latitude, longitude: stored.longitude };
+  }
+
+  // 2. Check general user location
+  try {
+    const generalStored = localStorage.getItem('pharmafind_user_location');
+    if (generalStored) {
+      const parsed = JSON.parse(generalStored);
+      if (parsed && Number.isFinite(parsed.latitude) && Number.isFinite(parsed.longitude)) {
+        return { latitude: parsed.latitude, longitude: parsed.longitude };
+      }
+    }
+  } catch {}
+
+  // 3. Try live browser geolocation
+  const live = await getDeviceLocation(6000);
+  if (live && Number.isFinite(live.latitude) && Number.isFinite(live.longitude)) {
+    storePatientLocation(live);
+    return live;
+  }
+
+  // 4. Safe Accra baseline (Legon / Greater Accra) if device denied
+  return { latitude: 5.6506, longitude: -0.1870 };
+}
+
 function toRad(degrees: number): number {
   return degrees * (Math.PI / 180);
 }
+

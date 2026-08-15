@@ -3,8 +3,9 @@ import { AlertCircle, ArrowRight, Clock3, HeartPulse, Loader2, MapPin, Navigatio
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getUser } from '../lib/auth';
-import { getDashboardData, type DashboardStats } from '../lib/data';
-import { calculateDistance, estimateDeliveryTime, getDeviceLocation, type Coordinates } from '../lib/geolocation';
+import { getDashboardData, isPharmacyOpen, type DashboardStats } from '../lib/data';
+import { getDeviceLocation, type Coordinates } from '../lib/geolocation';
+import { fetchRoadRoute } from '../lib/routing';
 import { getSupabaseClient } from '../lib/supabase';
 
 type RoleKey = 'USER' | 'PHARMACIST' | 'PHARMACY_ADMIN' | 'DRIVER' | 'SYSTEM_ADMIN';
@@ -21,6 +22,8 @@ type DrugRecord = {
   brandName: string;
   category?: string;
   price?: number | string;
+  minPrice?: number;
+  maxPrice?: number;
   isEmergency?: boolean;
   requiresRx?: boolean;
 };
@@ -35,6 +38,10 @@ type NearbyPharmacy = {
   distanceKm: number;
   etaMinutes: number;
   quantity: number;
+  price?: number;
+  pharmacyIsOpen: boolean;
+  pharmacyOpensAt?: string;
+  pharmacyClosesAt?: string;
 };
 
 type DeliverySummary = {
@@ -198,7 +205,7 @@ export function DashboardPage() {
       const client = getSupabaseClient();
       const { data: inventoryData, error: inventoryError } = await client
         .from('Inventory')
-        .select('id, quantity, pharmacyId, drugId, isAvailable, isActive')
+        .select('id, quantity, price, pharmacyId, drugId, isAvailable, isActive')
         .eq('drugId', drugId)
         .eq('isAvailable', true)
         .eq('isActive', true)
@@ -217,7 +224,7 @@ export function DashboardPage() {
       const pharmacyIds = [...new Set(inventoryData.map((item) => item.pharmacyId))];
       const { data: pharmacyRows, error: pharmacyError } = await client
         .from('Pharmacy')
-        .select('id, name, address, phone, latitude, longitude')
+        .select('id, name, address, phone, latitude, longitude, opensAt, closesAt')
         .in('id', pharmacyIds);
 
       if (pharmacyError) {
@@ -225,17 +232,19 @@ export function DashboardPage() {
       }
 
       const pharmacyMap = new Map((pharmacyRows ?? []).map((pharmacy) => [pharmacy.id, pharmacy]));
-      const matches = (inventoryData ?? [])
-        .map((entry) => {
+      const matches = await Promise.all(
+        (inventoryData ?? []).map(async (entry): Promise<NearbyPharmacy | null> => {
           const pharmacy = pharmacyMap.get(entry.pharmacyId);
           if (!pharmacy || pharmacy.latitude == null || pharmacy.longitude == null) {
             return null;
           }
 
-          const distanceKm = calculateDistance(userLocation, {
-            latitude: pharmacy.latitude,
-            longitude: pharmacy.longitude
-          });
+          const roadRoute = await fetchRoadRoute(
+            [pharmacy.latitude, pharmacy.longitude],
+            [userLocation.latitude, userLocation.longitude]
+          );
+
+          const numericPrice = Number(entry.price ?? 0);
 
           return {
             pharmacyId: pharmacy.id,
@@ -244,16 +253,27 @@ export function DashboardPage() {
             phone: pharmacy.phone || 'No phone listed',
             latitude: pharmacy.latitude,
             longitude: pharmacy.longitude,
-            distanceKm: Number(distanceKm.toFixed(1)),
-            etaMinutes: estimateDeliveryTime(distanceKm),
-            quantity: Number(entry.quantity ?? 0)
-          } satisfies NearbyPharmacy;
+            distanceKm: roadRoute.distanceKm,
+            etaMinutes: roadRoute.etaMinutes,
+            quantity: Number(entry.quantity ?? 0),
+            price: Number.isFinite(numericPrice) && numericPrice > 0 ? numericPrice : undefined,
+            pharmacyIsOpen: isPharmacyOpen((pharmacy as any).opensAt, (pharmacy as any).closesAt),
+            pharmacyOpensAt: (pharmacy as any).opensAt ?? undefined,
+            pharmacyClosesAt: (pharmacy as any).closesAt ?? undefined
+          };
         })
-        .filter((item): item is NearbyPharmacy => Boolean(item))
-        .sort((a, b) => a.distanceKm - b.distanceKm);
+      );
 
-      setNearbyPharmacies(matches);
-      if (matches.length === 0) {
+      // Open first, then by shortest road network distance
+      const sortedMatches = matches
+        .filter((item): item is NearbyPharmacy => Boolean(item))
+        .sort((a, b) => {
+          if (a.pharmacyIsOpen !== b.pharmacyIsOpen) return a.pharmacyIsOpen ? -1 : 1;
+          return a.distanceKm - b.distanceKm;
+        });
+
+      setNearbyPharmacies(sortedMatches);
+      if (sortedMatches.length === 0) {
         setSearchMessage('No pharmacies near your location currently have this drug in stock.');
       }
     } catch (err) {
@@ -292,7 +312,46 @@ export function DashboardPage() {
         throw error;
       }
 
-      const nextResults = (rows ?? []) as DrugRecord[];
+      const rawResults = (rows ?? []) as DrugRecord[];
+      
+      // Enrich with Inventory price range (MIN - MAX) across active/available inventory
+      const drugIds = rawResults.map((d) => d.id);
+      const { data: invRows } = drugIds.length > 0
+        ? await client
+            .from('Inventory')
+            .select('drugId, price')
+            .in('drugId', drugIds)
+            .eq('isActive', true)
+            .eq('isAvailable', true)
+            .gt('quantity', 0)
+        : { data: [] as any[] };
+
+      const priceMap = new Map<string, number[]>();
+      (invRows ?? []).forEach((item) => {
+        const p = Number(item.price);
+        if (Number.isFinite(p) && p > 0) {
+          if (!priceMap.has(item.drugId)) priceMap.set(item.drugId, []);
+          priceMap.get(item.drugId)!.push(p);
+        }
+      });
+
+      const nextResults = rawResults.map((drug) => {
+        const prices = priceMap.get(drug.id);
+        if (prices && prices.length > 0) {
+          return {
+            ...drug,
+            minPrice: Math.min(...prices),
+            maxPrice: Math.max(...prices)
+          };
+        }
+        const fallback = Number(drug.price ?? 0);
+        return {
+          ...drug,
+          minPrice: fallback > 0 ? fallback : undefined,
+          maxPrice: fallback > 0 ? fallback : undefined
+        };
+      });
+
       setDrugResults(nextResults);
 
       const searchLabel = [normalizedGeneric, normalizedBrand].filter(Boolean).join(' / ');
@@ -307,7 +366,6 @@ export function DashboardPage() {
 
       const chosenDrug = nextResults[0];
       setSelectedDrugId(chosenDrug.id);
-      setDrugResults(nextResults);
       await findNearestPharmacies(chosenDrug.id);
     } catch (err) {
       setSearchMessage(err instanceof Error ? err.message : 'Unable to search the drug catalogue.');
@@ -340,6 +398,8 @@ export function DashboardPage() {
       return;
     }
 
+    const unitPrice = Number(pharmacy.price ?? drugForOrder.price ?? 0);
+
     // For prescription drugs, navigate to upload page
     if (drugForOrder.requiresRx) {
       navigate('/prescriptions/upload', {
@@ -350,8 +410,8 @@ export function DashboardPage() {
           pharmacyId: pharmacy.pharmacyId,
           pharmacyName: pharmacy.pharmacyName,
           quantity: 1,
-          unitPrice: Number(drugForOrder.price ?? 0),
-          deliveryFee: 2.5,
+          unitPrice,
+          distanceKm: pharmacy.distanceKm,
           requiresRx: true
         }
       });
@@ -374,8 +434,8 @@ export function DashboardPage() {
           pharmacyId: pharmacy.pharmacyId,
           pharmacyName: pharmacy.pharmacyName,
           quantity: 1,
-          unitPrice: Number(drugForOrder.price ?? 0),
-          deliveryFee: 2.5,
+          unitPrice,
+          distanceKm: pharmacy.distanceKm,
           requiresRx: false
         }
       });
@@ -524,8 +584,13 @@ export function DashboardPage() {
                   >
                     <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Drug</div>
                     <div className="mt-2 text-lg font-black text-slate-900">{drug.genericName}</div>
-                    <div className="text-sm text-slate-600">{drug.brandName}</div>
-                    <div className="mt-3 text-sm font-semibold text-emerald-700">GH₵ {Number(drug.price ?? 0).toFixed(2)}</div>
+                    <div className="mt-3 text-sm font-bold text-emerald-700">
+                      {drug.minPrice != null && drug.maxPrice != null
+                        ? (drug.minPrice === drug.maxPrice
+                            ? `GH₵ ${drug.minPrice.toFixed(2)}`
+                            : `GH₵ ${drug.minPrice.toFixed(2)} - ${drug.maxPrice.toFixed(2)}`)
+                        : `GH₵ ${Number(drug.price ?? 0).toFixed(2)}`}
+                    </div>
                   </button>
                 ))}
               </div>
@@ -556,23 +621,50 @@ export function DashboardPage() {
                             <span>{pharmacy.address}</span>
                           </div>
                         </div>
-                        <div className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-bold text-emerald-700">
-                          {pharmacy.quantity} in stock
+                        <div className="flex flex-col items-end gap-2">
+                          <span className={`rounded-full px-3 py-1 text-xs font-bold ${
+                            pharmacy.pharmacyIsOpen
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-red-100 text-red-600'
+                          }`}>
+                            {pharmacy.pharmacyIsOpen ? 'OPEN NOW' : 'CLOSED'}
+                          </span>
+                          {pharmacy.pharmacyOpensAt && pharmacy.pharmacyClosesAt && (
+                            <span className="text-[11px] text-slate-500">
+                              {pharmacy.pharmacyOpensAt} – {pharmacy.pharmacyClosesAt}
+                            </span>
+                          )}
+                          <div className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-bold text-emerald-700">
+                            {pharmacy.quantity} in stock
+                          </div>
                         </div>
                       </div>
 
-                      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                      <div className="mt-4 grid gap-3 sm:grid-cols-4">
                         <div className="rounded-2xl bg-white p-3"><div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Distance</div><div className="mt-1 text-lg font-black text-slate-900">{pharmacy.distanceKm.toFixed(1)} km</div></div>
                         <div className="rounded-2xl bg-white p-3"><div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">ETA</div><div className="mt-1 text-lg font-black text-slate-900">{pharmacy.etaMinutes} min</div></div>
+                        <div className="rounded-2xl bg-white p-3"><div className="text-[10px] uppercase tracking-[0.18em] text-emerald-700">Price</div><div className="mt-1 text-lg font-black text-emerald-700">GH₵ {(pharmacy.price ?? Number(drugResults.find(d => d.id === selectedDrugId)?.price ?? 0)).toFixed(2)}</div></div>
                         <div className="rounded-2xl bg-white p-3"><div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Phone</div><div className="mt-1 text-sm font-black text-slate-900">{pharmacy.phone}</div></div>
                       </div>
 
                       <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-                        <button type="button" onClick={() => handleDirections(pharmacy)} className="secondary-button flex-1">
+                        <button
+                          type="button"
+                          disabled={!pharmacy.pharmacyIsOpen}
+                          onClick={() => handleDirections(pharmacy)}
+                          title={pharmacy.pharmacyIsOpen ? undefined : 'This pharmacy is currently closed'}
+                          className={`secondary-button flex-1 ${!pharmacy.pharmacyIsOpen ? 'cursor-not-allowed opacity-40' : ''}`}
+                        >
                           <Navigation className="mr-2 h-4 w-4" />
                           Get Directions
                         </button>
-                        <button type="button" onClick={() => void handleRequestDelivery(pharmacy)} className="primary-button flex-1">
+                        <button
+                          type="button"
+                          disabled={!pharmacy.pharmacyIsOpen}
+                          onClick={() => void handleRequestDelivery(pharmacy)}
+                          title={pharmacy.pharmacyIsOpen ? undefined : 'This pharmacy is currently closed'}
+                          className={`primary-button flex-1 ${!pharmacy.pharmacyIsOpen ? 'cursor-not-allowed opacity-40' : ''}`}
+                        >
                           <Truck className="mr-2 h-4 w-4" />
                           Request Delivery
                         </button>
