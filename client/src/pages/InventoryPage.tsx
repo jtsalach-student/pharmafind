@@ -1,5 +1,5 @@
 import { AlertCircle, AlertTriangle, ArrowLeft, Boxes, Loader2, PackageSearch, ShieldCheck, TrendingUp } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { getInventory, updateInventoryItem } from '../lib/data';
@@ -28,6 +28,7 @@ export function InventoryPage() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -72,6 +73,16 @@ export function InventoryPage() {
     }
   };
 
+  const filteredInventory = useMemo(() => {
+    if (!searchQuery.trim()) return inventory;
+    const query = searchQuery.toLowerCase();
+    return inventory.filter((item) => {
+      const genericMatch = item.drug?.genericName?.toLowerCase().includes(query) ?? false;
+      const brandMatch = item.drug?.brandName?.toLowerCase().includes(query) ?? false;
+      return genericMatch || brandMatch;
+    });
+  }, [inventory, searchQuery]);
+
   const lowStockItems = inventory.filter(item => item.quantity < 20).length;
   const totalActive = inventory.filter(item => item.isActive).length;
   const outOfStockItems = inventory.filter(item => item.quantity === 0).length;
@@ -97,6 +108,19 @@ export function InventoryPage() {
           <button type="button" className="primary-button px-4 py-2 text-sm">
             Export inventory report
           </button>
+        </div>
+
+        <div className="mt-6 flex flex-col gap-4 sm:flex-row">
+          <div className="relative flex-1">
+            <PackageSearch className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search by generic or brand name..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full rounded-[20px] border border-slate-200 bg-slate-50 py-3 pl-12 pr-4 text-sm font-semibold text-slate-900 transition-colors focus:border-sky-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-sky-500/10"
+            />
+          </div>
         </div>
 
         <div className="mt-6 grid gap-4 md:grid-cols-3">
@@ -132,7 +156,7 @@ export function InventoryPage() {
         <div className="mt-6 flex items-center justify-center rounded-[28px] border border-slate-200 bg-slate-50 p-12">
           <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
         </div>
-      ) : inventory.length === 0 ? (
+      ) : filteredInventory.length === 0 ? (
         <div className="mt-6 rounded-[28px] border border-slate-200 bg-slate-50 p-12 text-center">
           <p className="text-slate-600">No inventory items found.</p>
         </div>
@@ -148,7 +172,7 @@ export function InventoryPage() {
             </div>
 
             <div className="mt-4 space-y-3">
-              {inventory.map((item) => {
+              {filteredInventory.map((item) => {
                 const status = item.quantity === 0 ? 'Critical' : item.quantity < 20 ? 'Watch' : 'Healthy';
                 const risk = item.quantity === 0 ? 'High' : item.quantity < 20 ? 'Medium' : 'Low';
                 

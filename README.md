@@ -181,19 +181,19 @@ Update Delivery Request Status
 ## Screenshots
 
 ### Home Page
-![PharmaFind Home Page](docs/screenshots/home-page.png)
+![PharmaFind Home Page](screenshots/1.jpg)
 
 ### Pharmacy Locator
-![Pharmacy Locator](docs/screenshots/pharmacy-locator.png)
+![Pharmacy Locator](screenshots/pharmacy-locator.png)
 
 ### Inventory Dashboard
-![Inventory Dashboard](docs/screenshots/inventory-dashboard.png)
+![Inventory Dashboard](screenshots/inventory monitoring.jpg)
 
 ### Prescription Upload
-![Prescription Upload](docs/screenshots/prescription-upload.png)
+![Prescription Upload](screenshots/prescription upload.jpg)
 
 ### Driver Tracking
-![Driver Tracking](docs/screenshots/driver-tracking.png)
+![Driver Tracking](screenshots/user routing pharmacy.jpg)
 
 ## Technology Stack
 

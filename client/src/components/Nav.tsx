@@ -122,15 +122,15 @@ export function Nav() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => navigate('/search')}
+                      onClick={() => navigate('/inventory')}
                       className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
-                        location.pathname === '/search'
+                        location.pathname === '/inventory'
                           ? 'bg-slate-900 text-white shadow-xs'
                           : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                       }`}
                     >
                       <Search className="h-3.5 w-3.5" />
-                      Medication Catalog
+                      Medication Catalogue
                     </button>
                   </>
                 )}
